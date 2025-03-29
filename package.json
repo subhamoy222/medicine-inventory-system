@@ -4,7 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "cd backend && npm start",
-"install": "cd backend && npm install",
+    "install": "cd backend && npm install",
     "dev": "nodemon server.js"
   },
   "keywords": [],
@@ -16,6 +16,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
+    "mongodb": "4.0",
     "mongoose": "^8.5.4"
   },
   "devDependencies": {
