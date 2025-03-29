@@ -5,7 +5,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-"start": "cd backend && node server.js",
+"start": "node server.js",
 "install": "cd backend && npm install",
     "dev": "nodemon server.js"
   },
