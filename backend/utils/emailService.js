@@ -121,7 +121,7 @@ export const sendEmail = async ({ to, subject, html }) => {
 
 // Function to send email verification
 export const sendVerificationEmail = async (email, token) => {
-    const verificationUrl = `http://localhost:5000/api/users/verify-email?token=${token}`;
+    const verificationUrl = `https://medicine-inventory-system.onrender.com/api/users/verify-email?token=${token}`;
 
     const message = `
         <h1>Email Verification</h1>
