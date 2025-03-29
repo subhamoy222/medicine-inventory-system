@@ -89,40 +89,41 @@ connectDB();
 
 const app = express();
 
-// ✅ Allow Multiple Frontend Origins Dynamically
-const allowedOrigins = [
-  "https://inventory-frontent-q47t3oz9q-subhamoys-projects.vercel.app",
-  "https://medicine-inventory-management-bzluhdrbu-subhamoys-projects.vercel.app",
-  "https://medicine-inventory-management-me2cmek1q-subhamoys-projects.vercel.app",
-  "https://medicine-inventory-management-a1sej87ws-subhamoys-projects.vercel.app",
-  "https://medicine-inventory-management.vercel.app",
-];
+// // ✅ Allow Multiple Frontend Origins Dynamically
+// const allowedOrigins = [
+//   "https://inventory-frontent-q47t3oz9q-subhamoys-projects.vercel.app",
+//   "https://medicine-inventory-management-bzluhdrbu-subhamoys-projects.vercel.app",
+//   "https://medicine-inventory-management-me2cmek1q-subhamoys-projects.vercel.app",
+//   "https://medicine-inventory-management-a1sej87ws-subhamoys-projects.vercel.app",
+//   "https://medicine-inventory-management.vercel.app",
+// ];
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log(`❌ CORS Blocked: ${origin}`); // Log blocked origins for debugging
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: "GET, POST, PUT, DELETE",
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true, // Allow cookies & authentication headers
-};
+// const corsOptions = {
+//   origin: function (origin, callback) {
+//     if (!origin || allowedOrigins.includes(origin)) {
+//       callback(null, true);
+//     } else {
+//       console.log(`❌ CORS Blocked: ${origin}`); // Log blocked origins for debugging
+//       callback(new Error('Not allowed by CORS'));
+//     }
+//   },
+//   methods: "GET, POST, PUT, DELETE",
+//   allowedHeaders: ['Content-Type', 'Authorization'],
+//   credentials: true, // Allow cookies & authentication headers
+// };
 
-app.use(cors(corsOptions));
+// app.use(cors(corsOptions));
+
+// app.options("*", cors(corsOptions)); // Handle Preflight Requests
+
+// Middleware
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://medicine-inventory-management.vercel.app"], // Add your frontend URLs here
+    origin: ["http://localhost:3000", "https://inventory-frontent-q47t3oz9q-subhamoys-projects.vercel.app"], // Add your frontend URLs here
     methods: "GET,POST,PUT,DELETE",
     credentials: true, // If using cookies/authentication
   })
 );
-app.options("*", cors(corsOptions)); // Handle Preflight Requests
-
-// Middleware
 app.use(express.json());
 
 // API Routes
