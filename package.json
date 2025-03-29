@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
+   "install": "cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npm run build",
     "start": "cd backend && npm start",
-    "install": "cd backend && npm install",
-    "dev": "nodemon server.js"
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm start\""
   },
   "keywords": [],
   "author": "",
@@ -17,7 +18,8 @@
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "4.0",
-    "mongoose": "^8.5.4"
+    "mongoose": "^8.5.4",
+    "react-scripts": "^5.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
