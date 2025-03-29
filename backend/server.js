@@ -91,7 +91,7 @@ const app = express();
 
 // ✅ Allow Multiple Frontend Origins Dynamically
 const allowedOrigins = [
-  "https://medicine-inventory-management-ni12o5zp5-subhamoys-projects.vercel.app",
+  "https://inventory-frontent-q47t3oz9q-subhamoys-projects.vercel.app",
   "https://medicine-inventory-management-bzluhdrbu-subhamoys-projects.vercel.app",
   "https://medicine-inventory-management-me2cmek1q-subhamoys-projects.vercel.app",
   "https://medicine-inventory-management-a1sej87ws-subhamoys-projects.vercel.app",
