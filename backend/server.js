@@ -22,8 +22,9 @@ const app = express();
 
 // CORS Setup (Fixed Order)
 const corsOptions = {
-  origin: "https://medicine-inventory-management-fy1fr4qcp-subhamoys-projects.vercel.app", // Allow Vercel frontend
+  origin: 'https://medicine-inventory-management-ni12o5zp5-subhamoys-projects.vercel.app', // Allow Vercel frontend
   methods: "GET, POST, PUT, DELETE",
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, // Allow cookies & authentication headers
 };
 
@@ -46,7 +47,7 @@ app.use('/api/returns', returnBillRoutes);
 app.use(errorMiddleware);
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/medicineDB', {
+mongoose.connect(process.env.MONGO_URI || 'mongodb+srv://2023aspire117:l3K25C1ulK4M1ebW@medicineinventorymanage.uktzwsn.mongodb.net/?retryWrites=true&w=majority&appName=MedicineInventoryManagement', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
