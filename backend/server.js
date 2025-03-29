@@ -113,6 +113,13 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(
+  cors({
+    origin: ["http://localhost:3000", "https://medicine-inventory-management.vercel.app"], // Add your frontend URLs here
+    methods: "GET,POST,PUT,DELETE",
+    credentials: true, // If using cookies/authentication
+  })
+);
 app.options("*", cors(corsOptions)); // Handle Preflight Requests
 
 // Middleware
