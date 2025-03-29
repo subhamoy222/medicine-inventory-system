@@ -119,7 +119,7 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://inventory-frontent-q47t3oz9q-subhamoys-projects.vercel.app"], // Add your frontend URLs here
+    origin: "*", // Add your frontend URLs here
     methods: "GET,POST,PUT,DELETE",
     credentials: true, // If using cookies/authentication
   })
