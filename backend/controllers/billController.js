@@ -886,7 +886,19 @@ const createReturnBill = async (req, res) => {
 const getPartyInvoices = async (req, res) => {
   try {
     const { partyName } = req.params;
+    
+    // Check if user is authenticated
+    if (!req.user || !req.user.email) {
+      console.error('No user email found in request');
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
     const email = req.user.email;
+    console.log('Searching for party:', partyName);
+    console.log('Authenticated user email:', email);
 
     if (!partyName) {
       return res.status(400).json({
@@ -897,22 +909,30 @@ const getPartyInvoices = async (req, res) => {
 
     // Decode and normalize the party name
     const decodedPartyName = decodeURIComponent(partyName).trim();
-    console.log('Searching for party:', decodedPartyName); // Debug log
-    console.log('User email:', email); // Debug log
+    console.log('Decoded party name:', decodedPartyName);
 
-    // First, let's see all invoices for this user
+    // First, let's see all invoices for this user to debug
     const allInvoices = await SaleBill.find({ email }).select('partyName');
     console.log('All invoices for user:', allInvoices.map(inv => inv.partyName));
 
     // Use case-insensitive search with regex
     const invoices = await SaleBill.find({
       email,
-      partyName: { $regex: new RegExp(`^${decodedPartyName}$`, 'i') }
+      $expr: {
+        $eq: [
+          { $toLower: "$partyName" },
+          decodedPartyName.toLowerCase()
+        ]
+      }
     }).sort({ date: -1 });
 
-    console.log('Found invoices:', invoices.length); // Debug log
+    console.log('Found invoices:', invoices.length);
     if (invoices.length > 0) {
-      console.log('Sample invoice party name:', invoices[0].partyName); // Debug log
+      console.log('Sample invoice:', {
+        partyName: invoices[0].partyName,
+        invoiceNumber: invoices[0].saleInvoiceNumber,
+        date: invoices[0].date
+      });
     }
 
     if (!invoices.length) {
@@ -927,10 +947,11 @@ const getPartyInvoices = async (req, res) => {
       invoices
     });
   } catch (error) {
-    console.error('Error fetching party invoices:', error);
+    console.error('Error in getPartyInvoices:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching party invoices'
+      message: 'Error fetching party invoices',
+      error: error.message
     });
   }
 };

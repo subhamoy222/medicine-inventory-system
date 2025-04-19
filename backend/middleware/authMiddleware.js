@@ -19,7 +19,7 @@ export const isAuthenticated = (req, res, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         
-        if (!decoded || (!decoded.email && !decoded.id)) {
+        if (!decoded || !decoded.email) {
             return res.status(401).json({ 
                 success: false,
                 message: 'Not authorized, invalid token',
@@ -27,9 +27,17 @@ export const isAuthenticated = (req, res, next) => {
             });
         }
 
-        req.user = decoded;
+        // Set user information in the request
+        req.user = {
+            email: decoded.email,
+            id: decoded.id
+        };
+
+        console.log('Authenticated user:', req.user.email); // Debug log
+
         next();
     } catch (error) {
+        console.error('Authentication error:', error); // Debug log
         return res.status(401).json({ 
             success: false,
             message: 'Not authorized, token failed',
