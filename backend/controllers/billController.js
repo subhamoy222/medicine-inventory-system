@@ -97,6 +97,9 @@ const createSaleBill = async (req, res) => {
       return res.status(400).json({ message: "All fields, including items, are required." });
     }
 
+    // Normalize party name
+    const normalizedPartyName = partyName.trim();
+
     // Validate GST numbers in items
     const gstNumbers = items.map(item => item.gstNo);
     const uniqueGstNos = [...new Set(gstNumbers)];
@@ -173,12 +176,12 @@ const createSaleBill = async (req, res) => {
     // Calculate final amounts
     const netAmount = totalAmount - discountAmount;
 
-    // Create sale bill
+    // Create sale bill with normalized party name
     const newBill = new SaleBill({
       saleInvoiceNumber,
       date,
       receiptNumber,
-      partyName,
+      partyName: normalizedPartyName,
       items: items.map(item => ({
         ...item,
         quantity: Number(item.quantity),
@@ -190,7 +193,7 @@ const createSaleBill = async (req, res) => {
       discountAmount,
       netAmount,
       email,
-      gstNo // Store GST number with the bill
+      gstNo
     });
 
     const savedBill = await newBill.save();
@@ -873,18 +876,21 @@ const getPartyInvoices = async (req, res) => {
       });
     }
 
-    // Decode the party name from URL
-    const decodedPartyName = decodeURIComponent(partyName);
+    // Decode and normalize the party name
+    const decodedPartyName = decodeURIComponent(partyName).trim();
     console.log('Searching for party:', decodedPartyName); // Debug log
     console.log('User email:', email); // Debug log
 
-    // Find all sale bills for the given party name
+    // Use case-insensitive search with regex
     const invoices = await SaleBill.find({
       email,
-      partyName: { $regex: new RegExp(decodedPartyName, 'i') } // Case-insensitive search
-    }).sort({ date: -1 }); // Sort by date, newest first
+      partyName: { $regex: new RegExp(`^${decodedPartyName}$`, 'i') }
+    }).sort({ date: -1 });
 
     console.log('Found invoices:', invoices.length); // Debug log
+    if (invoices.length > 0) {
+      console.log('Sample invoice party name:', invoices[0].partyName); // Debug log
+    }
 
     if (!invoices.length) {
       return res.status(404).json({
