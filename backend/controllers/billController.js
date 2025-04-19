@@ -863,7 +863,7 @@ const createReturnBill = async (req, res) => {
 // Get all invoices for a specific party
 const getPartyInvoices = async (req, res) => {
   try {
-    const { partyName } = req.query; // Changed from req.params to req.query
+    const { partyName } = req.params;
     const email = req.user.email;
 
     if (!partyName) {
@@ -873,13 +873,15 @@ const getPartyInvoices = async (req, res) => {
       });
     }
 
-    console.log('Searching for party:', partyName); // Debug log
+    // Decode the party name from URL
+    const decodedPartyName = decodeURIComponent(partyName);
+    console.log('Searching for party:', decodedPartyName); // Debug log
     console.log('User email:', email); // Debug log
 
     // Find all sale bills for the given party name
     const invoices = await SaleBill.find({
       email,
-      partyName: { $regex: new RegExp(partyName, 'i') } // Case-insensitive search
+      partyName: { $regex: new RegExp(decodedPartyName, 'i') } // Case-insensitive search
     }).sort({ date: -1 }); // Sort by date, newest first
 
     console.log('Found invoices:', invoices.length); // Debug log
