@@ -24,7 +24,7 @@ const app = express();
 
 // CORS Configuration
 const corsOptions = {
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'https://medicine-inventory-management.vercel.app'],
+  origin: ['http://localhost:3000', 'http://localhost:3001', 'https://medicine-inventory-system.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
