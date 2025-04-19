@@ -4,10 +4,11 @@ import {
   createPurchaseBill,
   createSaleBill,
   createReturnBill,
-  getBills,
+  
   getBatchDetails,
   getPurchaseHistory,
-  getNextInvoiceNumber
+  getNextInvoiceNumber,
+  checkInvoiceValidity
 } from '../controllers/billController.js';
 import inventoryRoutes from './inventoryRoutes.js';
 
@@ -17,10 +18,11 @@ const router = express.Router();
 router.post('/purchase', isAuthenticated, createPurchaseBill);
 router.post('/sale', isAuthenticated, createSaleBill);
 router.post('/return', isAuthenticated, createReturnBill);
-router.get('/', isAuthenticated, getBills);
+
 router.get('/batch-details', getBatchDetails);
 router.get('/purchase-history/:gstNo', isAuthenticated, getPurchaseHistory);
 router.post('/next-invoice-number', isAuthenticated, getNextInvoiceNumber);
+router.post('/check-invoice', checkInvoiceValidity);
 
 // Inventory Sub-routes
 router.use('/inventory', inventoryRoutes);

@@ -6,25 +6,57 @@ const returnBillSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  originalInvoiceNumber: {
+    type: String,
+    required: true
+  },
+  email: {
+    type: String,
+    required: true
+  },
+  partyName: {
+    type: String,
+    required: true
+  },
+  gstNumber: {
+    type: String,
+    required: true
+  },
   date: {
     type: Date,
     default: Date.now
   },
-  customerGST: {
-    type: String,
-    required: true
-  },
   items: [{
-    itemName: String,
-    batch: String,
-    quantity: Number,
-    mrp: Number,
-    expiryDate: Date,
-    originalInvoice: String,
-    returnReason: String
+    itemName: {
+      type: String,
+      required: true
+    },
+    batch: {
+      type: String,
+      required: true
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1
+    },
+    mrp: {
+      type: Number,
+      required: true
+    },
+    amount: {
+      type: Number,
+      required: true
+    }
   }],
-  totalAmount: Number,
-  email: String // Pharmacy's email
-}, { timestamps: true });
+  totalAmount: {
+    type: Number,
+    required: true
+  }
+}, {
+  timestamps: true
+});
 
-export default mongoose.model('ReturnBill', returnBillSchema);
+const ReturnBill = mongoose.model('ReturnBill', returnBillSchema);
+
+export default ReturnBill;
