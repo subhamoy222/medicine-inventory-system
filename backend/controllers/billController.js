@@ -22,13 +22,13 @@ let inventory = {}; // Use an object to store item counts, keyed by itemName
 const createPurchaseBill = async (req, res) => {
     const {
         purchaseAmount, totalAmount, discountAmount, date,
-        supplierInvoiceNumber, receiptNumber, partyName, items,email
+        supplierInvoiceNumber, receiptNumber, partyName, items, email
     } = req.body;
     console.log(req.body)
     try {
         // Create the purchase bill with billType
         const purchaseBill = new Bill({
-            billType: 'purchase',  // Set the bill type to 'purchase'
+            billType: 'purchase',
             purchaseAmount,
             totalAmount,
             discountAmount,
@@ -40,49 +40,68 @@ const createPurchaseBill = async (req, res) => {
             email
         });
        
-
         // Save the purchase bill
         const savedPurchaseBill = await purchaseBill.save();
-        console.log("purchae bill",savedPurchaseBill)
+        console.log("purchase bill", savedPurchaseBill)
 
         // Update inventory for each item in the purchase bill
         for (const item of items) {
-            // Check if the item already exists in inventory
-            let inventoryItem = await Inventory.findOne({ itemName: item.itemName, batch: item.batch,email });
+            // Normalize item name and batch for case-insensitive search
+            const normalizedItemName = item.itemName.trim().toLowerCase();
+            const normalizedBatch = item.batch.trim().toLowerCase();
+
+            // Check if the item already exists in inventory with same batch
+            let inventoryItem = await Inventory.findOne({
+                email,
+                $expr: {
+                    $and: [
+                        { $eq: [{ $toLower: "$itemName" }, normalizedItemName] },
+                        { $eq: [{ $toLower: "$batch" }, normalizedBatch] }
+                    ]
+                }
+            });
 
             if (inventoryItem) {
                 // Update the existing inventory item
-                inventoryItem.quantity += item.quantity;  // Add the new quantity to the existing quantity
-                inventoryItem.purchaseRate = item.purchaseRate;  // Update other fields if necessary
-                inventoryItem.mrp = item.mrp;
+                inventoryItem.quantity += Number(item.quantity);
+                inventoryItem.purchaseRate = Number(item.purchaseRate);
+                inventoryItem.mrp = Number(item.mrp);
                 inventoryItem.expiryDate = item.expiryDate;
-                inventoryItem.gstPercentage = item.gstPercentage;
-                //inventoryItem.email=email
+                inventoryItem.gstPercentage = Number(item.gstPercentage);
                 
                 await inventoryItem.save();
+                console.log(`Updated existing inventory item: ${item.itemName} (${item.batch})`);
             } else {
                 // If the item doesn't exist in inventory, create a new one
                 const newInventoryItem = new Inventory({
-                    itemName: item.itemName,
-                    batch: item.batch,
+                    itemName: item.itemName.trim(), // Store original case
+                    batch: item.batch.trim(), // Store original case
                     expiryDate: item.expiryDate,
                     pack: item.pack,
-                    quantity: item.quantity,
-                    purchaseRate: item.purchaseRate,
-                    mrp: item.mrp,
-                    gstPercentage: item.gstPercentage,
+                    quantity: Number(item.quantity),
+                    purchaseRate: Number(item.purchaseRate),
+                    mrp: Number(item.mrp),
+                    gstPercentage: Number(item.gstPercentage),
                     description: item.description || '',
                     email,
                 });
-                console.log("new",newInventoryItem)
+                console.log("new", newInventoryItem)
 
                 await newInventoryItem.save();
+                console.log(`Created new inventory item: ${item.itemName} (${item.batch})`);
             }
         }
 
-        res.status(201).json({ message: 'Purchase bill created and inventory updated successfully', purchaseBill: savedPurchaseBill });
+        res.status(201).json({ 
+            message: 'Purchase bill created and inventory updated successfully', 
+            purchaseBill: savedPurchaseBill 
+        });
     } catch (error) {
-        res.status(500).json({ message: 'Error creating purchase bill or updating inventory', error: error.message });
+        console.error('Error in createPurchaseBill:', error);
+        res.status(500).json({ 
+            message: 'Error creating purchase bill or updating inventory', 
+            error: error.message 
+        });
     }
 };
 
