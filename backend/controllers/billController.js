@@ -300,122 +300,128 @@ export const getPurchaseHistory = async (req, res) => {
 };
 
 export const createReturnBill = async (req, res) => {
-  try {
-    const { customerGST, items, returnInvoiceNumber } = req.body;
-    const email = req.user.email;
+    try {
+        const { 
+            returnInvoiceNumber,
+            originalInvoiceNumber,
+            partyName,
+            gstNumber,
+            items
+        } = req.body;
+        
+        const email = req.user.email;
 
-    // Validate required fields
-    if (!customerGST || !items?.length || !returnInvoiceNumber) {
-      return res.status(400).json({ 
-        success: false,
-        message: "Customer GST, items, and invoice number are required" 
-      });
-    }
+        // Validate required fields
+        if (!returnInvoiceNumber || !originalInvoiceNumber || !partyName || !items?.length) {
+            return res.status(400).json({ 
+                success: false,
+                message: "Return invoice number, original invoice number, party name, and items are required" 
+            });
+        }
 
-    // Validate GST format
-    const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d[Z]{1}[A-Z\d]{1}$/;
-    if (!gstRegex.test(customerGST)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid GST Number format"
-      });
-    }
-
-    const validatedItems = [];
-    let totalAmount = 0;
-
-    // Validate each item
-    for (const item of items) {
-      const { batch, itemName, quantity, returnReason } = item;
-      
-      // Find original purchase
-      const purchase = await CustomerPurchase.aggregate([
-        { $match: { gstNo: customerGST } },
-        { $unwind: "$purchaseHistory" },
-        { $unwind: "$purchaseHistory.items" },
-        { $match: { 
-          "purchaseHistory.items.batch": batch,
-          "purchaseHistory.items.itemName": itemName 
-        }},
-        { $group: {
-          _id: null,
-          totalPurchased: { $sum: "$purchaseHistory.items.quantity" },
-          totalSold: { $sum: "$purchaseHistory.items.soldQuantity" },
-          mrp: { $first: "$purchaseHistory.items.mrp" },
-          expiryDate: { $first: "$purchaseHistory.items.expiryDate" }
-        }}
-      ]);
-
-      if (!purchase.length) {
-        return res.status(400).json({
-          success: false,
-          message: `${itemName} (${batch}) not purchased by this customer`
+        // Find original sale bill
+        const originalBill = await SaleBill.findOne({ 
+            saleInvoiceNumber: originalInvoiceNumber,
+            email: email
         });
-      }
 
-      const { totalPurchased, totalSold, mrp, expiryDate } = purchase[0];
-      const availableForReturn = totalPurchased - totalSold;
+        if (!originalBill) {
+            return res.status(404).json({
+                success: false,
+                message: "Original sale bill not found"
+            });
+        }
 
-      // Check expiry
-      if (new Date(expiryDate) < new Date()) {
-        return res.status(400).json({
-          success: false,
-          message: `${itemName} (${batch}) has expired`
+        const validatedItems = [];
+        let totalAmount = 0;
+        let discountAmount = 0;
+
+        // Validate each item
+        for (const item of items) {
+            const { itemName, batch, quantity, mrp, discount, returnReason } = item;
+            
+            // Check if item exists in original bill
+            const originalItem = originalBill.items.find(
+                i => i.itemName === itemName && i.batch === batch
+            );
+
+            if (!originalItem) {
+                return res.status(400).json({
+                    success: false,
+                    message: `${itemName} (${batch}) not found in original bill`
+                });
+            }
+
+            // Validate quantity
+            if (quantity > originalItem.quantity) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Return quantity cannot exceed original purchase quantity`
+                });
+            }
+
+            const itemTotal = quantity * mrp;
+            const itemDiscount = (itemTotal * discount) / 100;
+            
+            validatedItems.push({
+                itemName,
+                batch,
+                quantity,
+                mrp,
+                discount,
+                returnReason
+            });
+
+            totalAmount += itemTotal;
+            discountAmount += itemDiscount;
+        }
+
+        const netAmount = totalAmount - discountAmount;
+
+        // Create return bill
+        const returnBill = new ReturnBill({
+            returnInvoiceNumber,
+            originalInvoiceNumber,
+            date: new Date(),
+            partyName,
+            email,
+            gstNumber,
+            items: validatedItems,
+            totalAmount,
+            discountAmount,
+            netAmount
         });
-      }
 
-      // Validate quantity
-      if (quantity > availableForReturn) {
-        return res.status(400).json({
-          success: false,
-          message: `Max return quantity for ${itemName} is ${availableForReturn}`
+        await returnBill.save();
+
+        // Update inventory
+        for (const item of validatedItems) {
+            const inventoryItem = await Inventory.findOne({
+                itemName: item.itemName,
+                batch: item.batch,
+                email: email
+            });
+
+            if (inventoryItem) {
+                inventoryItem.quantity += item.quantity;
+                await inventoryItem.save();
+            }
+        }
+
+        res.status(201).json({
+            success: true,
+            message: "Return bill created successfully",
+            data: returnBill
         });
-      }
 
-      validatedItems.push({
-        itemName,
-        batch,
-        quantity,
-        mrp,
-        expiryDate,
-        returnReason,
-        originalInvoice: purchase.invoiceNumber
-      });
-
-      totalAmount += quantity * mrp;
+    } catch (error) {
+        console.error("Error creating return bill:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error creating return bill",
+            error: error.message
+        });
     }
-
-    // Create return bill
-    const returnBill = new ReturnBill({
-      returnInvoiceNumber,
-      customerGST,
-      items: validatedItems,
-      totalAmount,
-      email
-    });
-
-    await returnBill.save();
-
-    // Update inventory
-    await Promise.all(validatedItems.map(async (item) => {
-      await Inventory.findOneAndUpdate(
-        { email, batch: item.batch },
-        { $inc: { quantity: item.quantity } }
-      );
-    }));
-
-    res.status(201).json({
-      success: true,
-      message: "Return bill created successfully",
-      data: returnBill
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
 };
 // Fetch batch details for a specific customer and medicine
 // export const getBatchDetails = async (req, res) => {
