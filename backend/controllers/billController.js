@@ -795,6 +795,26 @@ const createReturnBill = async (req, res) => {
       });
     }
 
+    // Verify each medicine exists in the original invoice
+    for (const returnItem of items) {
+      const originalItem = saleBill.items.find(item => 
+        item.itemName.toLowerCase() === returnItem.itemName.toLowerCase() &&
+        item.batch === returnItem.batch
+      );
+
+      if (!originalItem) {
+        return res.status(400).json({
+          message: `Item ${returnItem.itemName} with batch ${returnItem.batch} not found in original invoice`
+        });
+      }
+
+      if (returnItem.quantity > originalItem.quantity) {
+        return res.status(400).json({
+          message: `Return quantity for ${returnItem.itemName} cannot exceed original quantity (${originalItem.quantity})`
+        });
+      }
+    }
+
     // Calculate total amount
     const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.mrp), 0);
 
@@ -825,10 +845,104 @@ const createReturnBill = async (req, res) => {
     }
 
     await returnBill.save();
-    res.status(201).json(returnBill);
+
+    res.status(201).json({
+      success: true,
+      message: 'Return bill created successfully',
+      returnBill
+    });
   } catch (error) {
     console.error('Error creating return bill:', error);
-    res.status(500).json({ message: 'Error creating return bill' });
+    res.status(500).json({
+      success: false,
+      message: 'Error creating return bill'
+    });
+  }
+};
+
+// Get all invoices for a specific party
+const getPartyInvoices = async (req, res) => {
+  try {
+    const { partyName } = req.query; // Changed from req.params to req.query
+    const email = req.user.email;
+
+    if (!partyName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Party name is required'
+      });
+    }
+
+    console.log('Searching for party:', partyName); // Debug log
+    console.log('User email:', email); // Debug log
+
+    // Find all sale bills for the given party name
+    const invoices = await SaleBill.find({
+      email,
+      partyName: { $regex: new RegExp(partyName, 'i') } // Case-insensitive search
+    }).sort({ date: -1 }); // Sort by date, newest first
+
+    console.log('Found invoices:', invoices.length); // Debug log
+
+    if (!invoices.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'No invoices found for this party'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      invoices
+    });
+  } catch (error) {
+    console.error('Error fetching party invoices:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching party invoices'
+    });
+  }
+};
+
+// Check if a medicine exists in party's invoices
+const checkMedicineInInvoices = async (req, res) => {
+  try {
+    const { partyName, medicineName } = req.params;
+    const email = req.user.email;
+
+    // Find all sale bills for the given party name
+    const invoices = await SaleBill.find({
+      email,
+      partyName: { $regex: new RegExp(partyName, 'i') },
+      'items.itemName': { $regex: new RegExp(medicineName, 'i') }
+    });
+
+    if (!invoices.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Medicine not found in any invoice for this party'
+      });
+    }
+
+    // Extract relevant information about the medicine
+    const medicineDetails = invoices.map(invoice => ({
+      invoiceNumber: invoice.saleInvoiceNumber,
+      date: invoice.date,
+      items: invoice.items.filter(item => 
+        item.itemName.toLowerCase().includes(medicineName.toLowerCase())
+      )
+    }));
+
+    res.status(200).json({
+      success: true,
+      medicineDetails
+    });
+  } catch (error) {
+    console.error('Error checking medicine in invoices:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking medicine in invoices'
+    });
   }
 };
 
@@ -841,7 +955,9 @@ export {
   getNextInvoiceNumber,
   checkInvoiceValidity,
   createReturnBill,
-  getBatchDetails
+  getBatchDetails,
+  getPartyInvoices,
+  checkMedicineInInvoices
 };
 
 

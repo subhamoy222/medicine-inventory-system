@@ -38,6 +38,14 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// API Routes
+app.use('/api/users', userRoutes);
+app.use('/api/bills', billRoutes);
+app.use('/api/expiry-bills', expiryBillRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/expiry', expiryRoutes);
+app.use('/api/returns', returnBillRoutes);
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ 
@@ -47,19 +55,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes
-app.use('/api/users', userRoutes);
-app.use('/api/bills', billRoutes);
-app.use('/api/expiry-bills', expiryBillRoutes);
-app.use('/api/inventory', inventoryRoutes);
-app.use('/api/expiry', expiryRoutes);
-app.use('/api/returns', returnBillRoutes);
-
 // Error Handling Middleware
 app.use(errorMiddleware);
 
-// 404 Handler
+// 404 Handler - This should be the last route
 app.use((req, res) => {
+  console.log('404 - Route not found:', req.originalUrl); // Debug log
   res.status(404).json({
     success: false,
     message: 'Route not found',

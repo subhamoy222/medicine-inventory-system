@@ -8,7 +8,9 @@ import {
   getBatchDetails,
   getPurchaseHistory,
   getNextInvoiceNumber,
-  checkInvoiceValidity
+  checkInvoiceValidity,
+  getPartyInvoices,
+  checkMedicineInInvoices
 } from '../controllers/billController.js';
 import inventoryRoutes from './inventoryRoutes.js';
 
@@ -23,6 +25,10 @@ router.get('/batch-details', getBatchDetails);
 router.get('/purchase-history/:gstNo', isAuthenticated, getPurchaseHistory);
 router.post('/next-invoice-number', isAuthenticated, getNextInvoiceNumber);
 router.post('/check-invoice', checkInvoiceValidity);
+
+// Changed to use query parameter
+router.get('/party-invoices/:partyName', isAuthenticated, getPartyInvoices);
+router.get('/check-medicine/:partyName/:medicineName', checkMedicineInInvoices);
 
 // Inventory Sub-routes
 router.use('/inventory', inventoryRoutes);
