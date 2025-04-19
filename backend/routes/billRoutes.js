@@ -6,7 +6,8 @@ import {
   createReturnBill,
   getBills,
   getBatchDetails,
-  getPurchaseHistory
+  getPurchaseHistory,
+  getNextInvoiceNumber
 } from '../controllers/billController.js';
 import inventoryRoutes from './inventoryRoutes.js';
 
@@ -19,6 +20,7 @@ router.post('/return', isAuthenticated, createReturnBill);
 router.get('/', isAuthenticated, getBills);
 router.get('/batch-details', getBatchDetails);
 router.get('/purchase-history/:gstNo', isAuthenticated, getPurchaseHistory);
+router.post('/next-invoice-number', isAuthenticated, getNextInvoiceNumber);
 
 // Inventory Sub-routes
 router.use('/inventory', inventoryRoutes);

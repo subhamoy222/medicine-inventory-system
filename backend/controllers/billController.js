@@ -687,4 +687,47 @@ export const getInventory = async (req, res) => {
   }
 };
 
+// Get the next invoice number
+export const getNextInvoiceNumber = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const userEmail = req.user?.email || email;
+    
+    console.log("Received request for next invoice number with email:", userEmail);
+    
+    if (!userEmail) {
+      console.log("Email is missing in request");
+      return res.status(400).json({ message: "Email is required" });
+    }
+    
+    // Find the last invoice for this user
+    const lastInvoice = await SaleBill.findOne({ email: userEmail })
+      .sort({ saleInvoiceNumber: -1 })
+      .select('saleInvoiceNumber');
+
+    console.log("Last invoice found:", lastInvoice);
+    
+    let nextNumber = 5; // Default starting number
+    
+    if (lastInvoice && lastInvoice.saleInvoiceNumber) {
+      // Extract the number from the last invoice (e.g., "INV007" -> 7)
+      const lastNumber = parseInt(lastInvoice.saleInvoiceNumber.replace('INV', ''));
+      nextNumber = lastNumber + 1;
+      console.log("Calculated next number:", nextNumber);
+    }
+
+    const invoiceNumber = `INV${String(nextNumber).padStart(3, '0')}`;
+    console.log("Generated invoice number:", invoiceNumber);
+    
+    res.status(200).json({ invoiceNumber });
+  } catch (error) {
+    console.error('Error in getNextInvoiceNumber:', error);
+    res.status(500).json({ 
+      message: 'Error getting next invoice number',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
 

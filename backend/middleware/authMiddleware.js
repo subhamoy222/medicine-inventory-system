@@ -1,28 +1,45 @@
 import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
 
+dotenv.config();
 
 export const isAuthenticated = (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer')) {
-        return res.status(401).json({ message: 'Not authorized, token failed' });
+        return res.status(401).json({ 
+            success: false,
+            message: 'Not authorized, token failed',
+            error: 'No token provided'
+        });
     }
 
-    const token = authHeader.split(' ')[1]; // Extract token
+    const token = authHeader.split(' ')[1];
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET); // Verify token
-        req.user = decoded; // Add user info to request
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        if (!decoded || (!decoded.email && !decoded.id)) {
+            return res.status(401).json({ 
+                success: false,
+                message: 'Not authorized, invalid token',
+                error: 'Invalid token payload'
+            });
+        }
+
+        req.user = decoded;
         next();
     } catch (error) {
-        return res.status(401).json({ message: 'Not authorized, token failed' });
+        return res.status(401).json({ 
+            success: false,
+            message: 'Not authorized, token failed',
+            error: error.message
+        });
     }
 };
 
 // middlewares/authMiddleware.js
 // import jwt from 'jsonwebtoken';
-
-import dotenv from 'dotenv';
 
 // export const isAuthenticated = (req, res, next) => {
 //     const authHeader = req.headers.authorization;
