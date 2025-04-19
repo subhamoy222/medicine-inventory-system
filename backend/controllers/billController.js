@@ -881,6 +881,10 @@ const getPartyInvoices = async (req, res) => {
     console.log('Searching for party:', decodedPartyName); // Debug log
     console.log('User email:', email); // Debug log
 
+    // First, let's see all invoices for this user
+    const allInvoices = await SaleBill.find({ email }).select('partyName');
+    console.log('All invoices for user:', allInvoices.map(inv => inv.partyName));
+
     // Use case-insensitive search with regex
     const invoices = await SaleBill.find({
       email,
