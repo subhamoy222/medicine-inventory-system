@@ -5,7 +5,7 @@ import SaleBill from '../models/SaleBillModel.js';
 import mongoose from 'mongoose';
 import Inventory from '../models/Inventory.js'; // Adjust the path as needed
 import CustomerPurchase from "../models/CustomerPurchase.js"; // Adjust the path if necessary
-
+import ReturnBill from '../models/ReturnBillSchema.js';  // Adjust the path if necessary
 import { validateGSTNumber } from '../utils/validators.js';
 
 
@@ -22,47 +22,16 @@ let inventory = {}; // Use an object to store item counts, keyed by itemName
 export const createPurchaseBill = async (req, res) => {
     const {
         purchaseAmount, totalAmount, discountAmount, date,
-        supplierInvoiceNumber, receiptNumber, partyName, items, email
+        supplierInvoiceNumber, receiptNumber, partyName, items,email
     } = req.body;
-    
     console.log(req.body)
     try {
-        // Calculate amounts for each item
-        let totalGSTAmount = 0;
-        let totalNetAmount = 0;
-
-        // Process each item to calculate required fields
-        for (const item of items) {
-            const { quantity, purchaseRate, discount, gstPercentage } = item;
-            
-            // Calculate item total amount (quantity * purchase rate)
-            item.totalAmount = quantity * purchaseRate;
-            
-            // Calculate discount amount on total amount
-            item.discountAmount = (item.totalAmount * discount) / 100;
-            
-            // Calculate amount after discount
-            const amountAfterDiscount = item.totalAmount - item.discountAmount;
-            
-            // Calculate GST amount on discounted amount
-            item.gstAmount = (amountAfterDiscount * gstPercentage) / 100;
-            
-            // Calculate net amount for this item
-            item.netAmount = amountAfterDiscount + item.gstAmount;
-
-            // Update totals
-            totalGSTAmount += item.gstAmount;
-            totalNetAmount += item.netAmount;
-        }
-
         // Create the purchase bill with billType
         const purchaseBill = new Bill({
             billType: 'purchase',  // Set the bill type to 'purchase'
             purchaseAmount,
             totalAmount,
             discountAmount,
-            gstAmount: totalGSTAmount,
-            netAmount: totalNetAmount,
             date,
             supplierInvoiceNumber,
             receiptNumber,
@@ -70,7 +39,8 @@ export const createPurchaseBill = async (req, res) => {
             items,
             email
         });
-        
+       
+
         // Save the purchase bill
         const savedPurchaseBill = await purchaseBill.save();
         console.log("purchae bill",savedPurchaseBill)
@@ -119,159 +89,191 @@ export const createPurchaseBill = async (req, res) => {
 
 
 export const createSaleBill = async (req, res) => {
-  try {
-    const { saleInvoiceNumber, date, receiptNumber, partyName, items, email } = req.body;
-    
-    console.log('Creating sale bill with email:', email);
-    
-    // Validate required fields
-    if (!saleInvoiceNumber || !date || !receiptNumber || !partyName || !items || !items.length || !email) {
-      return res.status(400).json({ message: "All fields, including items, are required." });
+    try {
+        const { saleInvoiceNumber, date, receiptNumber, partyName, items } = req.body;
+        const email = req.user.email;
+
+        if (!email) {
+            return res.status(400).json({ message: 'User email is required' });
+        }
+
+        console.log('Creating sale bill with data:', {
+            saleInvoiceNumber,
+            date,
+            receiptNumber,
+            partyName,
+            email,
+            items
+        });
+
+        // Check if there are any inventory items for this user
+        const userInventory = await Inventory.find({ email });
+        console.log('User inventory items:', userInventory.map(item => ({
+            itemName: item.itemName,
+            batch: item.batch,
+            quantity: item.quantity
+        })));
+
+        // Validate required fields
+        if (!saleInvoiceNumber || !date || !receiptNumber || !partyName || !items || !items.length) {
+            return res.status(400).json({ message: 'All fields, including items, are required' });
+        }
+
+        // Validate GST numbers in items
+        const gstNumbers = items.map(item => item.gstNo);
+        const uniqueGstNos = [...new Set(gstNumbers)];
+        if (uniqueGstNos.length !== 1) {
+            return res.status(400).json({ message: 'All items in a bill must belong to the same GST number' });
+        }
+        const gstNo = uniqueGstNos[0];
+
+        let totalAmount = 0;
+        let discountAmount = 0;
+
+        // Process items and validate inventory
+        for (const item of items) {
+            const { itemName, batch, quantity, mrp, discount } = item;
+
+            console.log('Processing item:', {
+                itemName,
+                batch,
+                quantity,
+                mrp,
+                discount
+            });
+
+            // Validate item fields
+            if (!itemName || !batch || !gstNo) {
+                return res.status(400).json({ message: `Invalid input in item: ${JSON.stringify(item)}` });
+            }
+
+            // Convert to numbers
+            const parsedQuantity = Number(quantity);
+            const parsedMrp = Number(mrp);
+            const parsedDiscount = Number(discount);
+
+            // Validate numeric values
+            if (isNaN(parsedQuantity) || isNaN(parsedMrp) || isNaN(parsedDiscount)) {
+                return res.status(400).json({ message: `Invalid numeric values in item: ${JSON.stringify(item)}` });
+            }
+
+            if (parsedQuantity <= 0 || parsedMrp < 0 || parsedDiscount < 0) {
+                return res.status(400).json({
+                    message: `Invalid values: Quantity must be >0, MRP & discount >=0`
+                });
+            }
+
+            // Calculate item values
+            const itemAmount = parsedQuantity * parsedMrp;
+            const itemDiscount = (itemAmount * parsedDiscount) / 100;
+
+            totalAmount += itemAmount;
+            discountAmount += itemDiscount;
+
+            // Inventory check
+            const inventoryItem = await Inventory.findOne({
+                email,
+                itemName: { $regex: new RegExp(`^${itemName}$`, 'i') },
+                batch: { $regex: new RegExp(`^${batch}$`, 'i') },
+            });
+
+            console.log('Inventory check result:', inventoryItem);
+
+            if (!inventoryItem) {
+                return res.status(400).json({
+                    message: `Item ${itemName} (${batch}) not found in inventory`
+                });
+            }
+
+            if (inventoryItem.quantity < parsedQuantity) {
+                return res.status(400).json({
+                    message: `Insufficient stock for ${itemName} (Available: ${inventoryItem.quantity})`
+                });
+            }
+
+            // Update inventory
+            inventoryItem.quantity -= parsedQuantity;
+            await inventoryItem.save();
+        }
+
+        // Calculate final amounts
+        const netAmount = totalAmount - discountAmount;
+
+        console.log('Creating sale bill with amounts:', {
+            totalAmount,
+            discountAmount,
+            netAmount
+        });
+
+        // Create sale bill
+        const newBill = new SaleBill({
+            saleInvoiceNumber,
+            date,
+            receiptNumber,
+            partyName,
+            items: items.map(item => ({
+                ...item,
+                quantity: Number(item.quantity),
+                mrp: Number(item.mrp),
+                discount: Number(item.discount),
+                amount: Number(item.quantity) * Number(item.mrp),
+            })),
+            totalAmount,
+            discountAmount,
+            netAmount,
+            email,
+            gstNo
+        });
+
+        console.log('Saving sale bill:', newBill);
+
+        const savedBill = await newBill.save();
+
+        console.log('Sale bill saved successfully:', savedBill);
+
+        // Update customer purchase history by GST number
+        let customerPurchase = await CustomerPurchase.findOne({ gstNo });
+
+        if (!customerPurchase) {
+            customerPurchase = new CustomerPurchase({
+                gstNo,
+                partyName,
+                purchaseHistory: []
+            });
+        }
+
+        // Add purchase record
+        customerPurchase.purchaseHistory.push({
+            date: new Date(),
+            invoiceNumber: saleInvoiceNumber,
+            items: items.map(item => ({
+                itemName: item.itemName,
+                batch: item.batch,
+                quantity: Number(item.quantity),
+                rate: Number(item.mrp),
+                discount: Number(item.discount),
+                amount: Number(item.quantity) * Number(item.mrp)
+            })),
+            totalAmount: netAmount
+        });
+
+        await customerPurchase.save();
+
+        return res.status(201).json({
+            message: 'Sale bill created successfully',
+            bill: savedBill,
+            inventoryUpdated: true,
+            customerRecordUpdated: true
+        });
+
+    } catch (error) {
+        console.error('Error creating sale bill:', error);
+        return res.status(500).json({
+            message: 'Internal server error',
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
-
-    // Validate GST numbers in items
-    const gstNumbers = items.map(item => item.gstNo);
-    const uniqueGstNos = [...new Set(gstNumbers)];
-    if (uniqueGstNos.length !== 1) {
-      return res.status(400).json({ 
-        message: "All items in a bill must belong to the same GST number" 
-      });
-    }
-    const gstNo = uniqueGstNos[0];
-
-    let totalAmount = 0;
-    let discountAmount = 0;
-
-    // Process items and validate inventory
-    for (const item of items) {
-      const { itemName, batch, quantity, mrp, discount } = item;
-
-      // Validate item fields
-      if (!itemName || !batch || !gstNo) {
-        return res.status(400).json({ 
-          message: `Invalid input in item: ${JSON.stringify(item)}` 
-        });
-      }
-
-      // Convert to numbers
-      const parsedQuantity = Number(quantity);
-      const parsedMrp = Number(mrp);
-      const parsedDiscount = Number(discount);
-
-      // Validate numeric values
-      if (isNaN(parsedQuantity) || isNaN(parsedMrp) || isNaN(parsedDiscount)) {
-        return res.status(400).json({ 
-          message: `Invalid numeric values in item: ${JSON.stringify(item)}` 
-        });
-      }
-
-      if (parsedQuantity <= 0 || parsedMrp < 0 || parsedDiscount < 0) {
-        return res.status(400).json({
-          message: `Invalid values: Quantity must be >0, MRP & discount >=0`
-        });
-      }
-
-      // Calculate item values
-      const itemAmount = parsedQuantity * parsedMrp;
-      const itemDiscount = (itemAmount * parsedDiscount) / 100;
-
-      totalAmount += itemAmount;
-      discountAmount += itemDiscount;
-
-      // Inventory check
-      const inventoryItem = await Inventory.findOne({
-        email,
-        itemName: { $regex: new RegExp(`^${itemName}$`, 'i') },
-        batch: { $regex: new RegExp(`^${batch}$`, 'i') },
-      });
-
-      if (!inventoryItem) {
-        return res.status(400).json({
-          message: `Item ${itemName} (${batch}) not found in inventory`
-        });
-      }
-
-      if (inventoryItem.quantity < parsedQuantity) {
-        return res.status(400).json({
-          message: `Insufficient stock for ${itemName} (Available: ${inventoryItem.quantity})`
-        });
-      }
-
-      // Update inventory
-      inventoryItem.quantity -= parsedQuantity;
-      await inventoryItem.save();
-    }
-
-    // Calculate final amounts
-    const netAmount = totalAmount - discountAmount;
-
-    // Create sale bill
-    const newBill = new SaleBill({
-      saleInvoiceNumber,
-      date,
-      receiptNumber,
-      partyName,
-      items: items.map(item => ({
-        ...item,
-        quantity: Number(item.quantity),
-        mrp: Number(item.mrp),
-        discount: Number(item.discount),
-        amount: Number(item.quantity) * Number(item.mrp),
-      })),
-      totalAmount,
-      discountAmount,
-      netAmount,
-      email,
-      gstNo // Store GST number with the bill
-    });
-
-    console.log('Saving sale bill:', newBill);
-
-    const savedBill = await newBill.save();
-
-    // Update customer purchase history by GST number
-    let customerPurchase = await CustomerPurchase.findOne({ gstNo });
-
-    if (!customerPurchase) {
-      customerPurchase = new CustomerPurchase({
-        gstNo,
-        partyName,
-        purchaseHistory: []
-      });
-    }
-
-    // Add purchase record
-    customerPurchase.purchaseHistory.push({
-      date: new Date(),
-      invoiceNumber: saleInvoiceNumber,
-      items: items.map(item => ({
-        itemName: item.itemName,
-        batch: item.batch,
-        quantity: Number(item.quantity),
-        rate: Number(item.mrp),
-        discount: Number(item.discount),
-        amount: Number(item.quantity) * Number(item.mrp)
-      })),
-      totalAmount: netAmount
-    });
-
-    await customerPurchase.save();
-
-    return res.status(201).json({
-      message: 'Sale bill created successfully',
-      bill: savedBill,
-      inventoryUpdated: true,
-      customerRecordUpdated: true
-    });
-
-  } catch (error) {
-    console.error('Error creating sale bill:', error);
-    return res.status(500).json({
-      message: 'Internal server error',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
 };
 
 // controllers/billController.js
@@ -770,129 +772,161 @@ export const getNextInvoiceNumber = async (req, res) => {
   }
 };
 
-// Get detailed sales information for a specific medicine
 export const getMedicineSalesDetails = async (req, res) => {
     try {
         const { medicineName, startDate, endDate, partyName } = req.query;
-        const email = req.user.email; // Get email from authenticated user
-        
-        console.log('Query parameters:', { medicineName, startDate, endDate, partyName });
-        console.log('User email:', email);
+        const userId = req.user.id;
+        const email = req.user.email;
+
+        console.log('Request parameters:', {
+            medicineName,
+            startDate,
+            endDate,
+            partyName,
+            userId,
+            email
+        });
+
+        // Validate required fields
+        if (!medicineName) {
+            return res.status(400).json({ message: 'Medicine name is required' });
+        }
+
+        // Set default date range if not provided
+        const defaultStartDate = new Date();
+        defaultStartDate.setFullYear(defaultStartDate.getFullYear() - 5); // Last 5 years
+        const queryStartDate = startDate ? new Date(startDate) : defaultStartDate;
+        const queryEndDate = endDate ? new Date(endDate) : new Date();
+
+        console.log('Date range:', {
+            start: queryStartDate,
+            end: queryEndDate
+        });
 
         // First, let's check if there are any sale bills for this user
-        const allUserBills = await SaleBill.find({ email });
-        console.log('Total bills for user:', allUserBills.length);
-        console.log('Sample bill data:', allUserBills[0] ? {
-            partyName: allUserBills[0].partyName,
-            items: allUserBills[0].items.map(item => ({
-                itemName: item.itemName,
-                quantity: item.quantity
-            }))
-        } : 'No bills found');
+        const allUserBills = await SaleBill.find({
+            $or: [
+                { userId: userId },
+                { email: email }
+            ]
+        });
 
-        // Build the query with case-insensitive medicine name search
+        console.log(`Total bills for user (${userId}/${email}):`, allUserBills.length);
+        if (allUserBills.length > 0) {
+            console.log('Sample bill items:', allUserBills[0].items.map(item => ({
+                itemName: item.itemName,
+                batch: item.batch
+            })));
+        }
+
+        // Construct the query
         const query = {
-            email,
-            'items.itemName': { $regex: medicineName, $options: 'i' }
+            $or: [
+                { userId: userId },
+                { email: email }
+            ],
+            'items.itemName': { $regex: new RegExp(medicineName, 'i') },
+            date: {
+                $gte: queryStartDate,
+                $lte: queryEndDate
+            }
         };
 
-        // Add date range if provided, otherwise use a wide range
-        if (startDate && endDate) {
-            query.date = {
-                $gte: new Date(startDate),
-                $lte: new Date(endDate)
-            };
-        } else {
-            // If no date range provided, use last 5 years
-            const fiveYearsAgo = new Date();
-            fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
-            query.date = {
-                $gte: fiveYearsAgo,
-                $lte: new Date()
-            };
-        }
-
-        // Add party name if provided
+        // Add party name filter if provided
         if (partyName) {
-            query.partyName = { $regex: partyName, $options: 'i' };
+            query.partyName = { $regex: new RegExp(partyName, 'i') };
         }
 
-        console.log('MongoDB query:', JSON.stringify(query, null, 2));
+        console.log('Searching with query:', JSON.stringify(query, null, 2));
 
-        // Find sale bills
+        // Find all sale bills matching the criteria
         const saleBills = await SaleBill.find(query);
-        console.log('Number of bills found:', saleBills.length);
-        console.log('Found bills:', saleBills.map(bill => ({
-            partyName: bill.partyName,
-            date: bill.date,
-            items: bill.items.map(item => ({
-                itemName: item.itemName,
-                quantity: item.quantity
-            }))
-        })));
+
+        console.log(`Found ${saleBills.length} sale bills matching criteria`);
 
         if (saleBills.length === 0) {
             return res.status(404).json({ 
                 message: 'No sales found for the specified criteria',
-                query: query,
-                totalBillsForUser: allUserBills.length
+                debug: {
+                    totalUserBills: allUserBills.length,
+                    medicineName,
+                    dateRange: {
+                        start: queryStartDate,
+                        end: queryEndDate
+                    },
+                    partyName
+                }
             });
         }
 
-        // Process the results
-        const results = {
-            totalQuantity: 0,
-            totalAmount: 0,
-            totalDiscount: 0,
-            salesByParty: {},
-            salesByDate: {}
-        };
+        // Calculate total sales and prepare response
+        const totalSales = saleBills.reduce((sum, bill) => {
+            const item = bill.items.find(item => 
+                item.itemName.toLowerCase().includes(medicineName.toLowerCase())
+            );
+            return sum + (item ? item.quantity : 0);
+        }, 0);
 
-        saleBills.forEach(bill => {
-            bill.items.forEach(item => {
-                if (item.itemName.toLowerCase().includes(medicineName.toLowerCase())) {
-                    results.totalQuantity += item.quantity;
-                    const itemTotal = item.quantity * item.mrp;
-                    const itemDiscount = (itemTotal * item.discount) / 100;
-                    results.totalAmount += itemTotal;
-                    results.totalDiscount += itemDiscount;
-
-                    // Group by party
-                    if (!results.salesByParty[bill.partyName]) {
-                        results.salesByParty[bill.partyName] = {
-                            quantity: 0,
-                            amount: 0,
-                            discount: 0
-                        };
-                    }
-                    results.salesByParty[bill.partyName].quantity += item.quantity;
-                    results.salesByParty[bill.partyName].amount += itemTotal;
-                    results.salesByParty[bill.partyName].discount += itemDiscount;
-
-                    // Group by date
-                    const dateStr = bill.date.toISOString().split('T')[0];
-                    if (!results.salesByDate[dateStr]) {
-                        results.salesByDate[dateStr] = {
-                            quantity: 0,
-                            amount: 0,
-                            discount: 0
-                        };
-                    }
-                    results.salesByDate[dateStr].quantity += item.quantity;
-                    results.salesByDate[dateStr].amount += itemTotal;
-                    results.salesByDate[dateStr].discount += itemDiscount;
-                }
-            });
+        // Prepare detailed response
+        const salesDetails = saleBills.map(bill => {
+            const item = bill.items.find(item => 
+                item.itemName.toLowerCase().includes(medicineName.toLowerCase())
+            );
+            return {
+                saleInvoiceNumber: bill.saleInvoiceNumber,
+                date: bill.date,
+                partyName: bill.partyName,
+                quantity: item ? item.quantity : 0,
+                mrp: item ? item.mrp : 0,
+                discount: item ? item.discount : 0,
+                gstNo: item ? item.gstNo : ''
+            };
         });
 
-        res.json(results);
+        res.status(200).json({
+            totalSales,
+            salesDetails
+        });
     } catch (error) {
         console.error('Error in getMedicineSalesDetails:', error);
-        res.status(500).json({ message: 'Error fetching medicine sales details', error: error.message });
+        res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
 
-// Export all functions
-export {};
+export const getPurchaseBillHistory = async (req, res) => {
+  try {
+    const { startDate, endDate, partyName, itemName, email } = req.query;
+
+    const filter = { billType: 'purchase', email }; // Always filter by purchase bills for this endpoint
+
+    if (startDate && endDate) {
+      filter.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+
+    if (partyName) {
+      filter.partyName = { $regex: new RegExp(partyName, 'i') }; // case-insensitive match
+    }
+
+    if (itemName) {
+      filter['items.itemName'] = { $regex: new RegExp(itemName, 'i') }; // case-insensitive
+    }
+
+    const bills = await Bill.find(filter).sort({ date: -1 });
+
+    if (!bills.length) {
+      return res.status(404).json({ message: "No purchase bills found matching the criteria." });
+    }
+
+    res.status(200).json({ count: bills.length, bills });
+
+  } catch (error) {
+    console.error("Error fetching purchase bill history:", error);
+    res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
 
 

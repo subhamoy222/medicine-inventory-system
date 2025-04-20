@@ -106,15 +106,11 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
-        // Generate token for the authenticated user
-        const token = generateToken(user);
+        // Generate token for the authenticated user with both id and email
+        const token = generateToken(user._id, user.email);
 
-        // Send the token and user info in the response
-        res.status(200).json({ 
-            token,
-            email: user.email,
-            userId: user._id
-        });
+        // Send the token in the response
+        res.status(200).json({ token: token, email: email });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server error' });
