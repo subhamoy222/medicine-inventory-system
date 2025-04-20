@@ -10,7 +10,12 @@ const itemSchema = new mongoose.Schema({
     expiryDate: { type: Date, required: true },
     gstPercentage: { type: Number, required: true },
     pack: { type: String, required: false }, // Optional
-    description: { type: String, required: false } // Optional
+    description: { type: String, required: false }, // Optional
+    discount: { type: Number, required: true }, // Discount percentage
+    totalAmount: { type: Number, required: true }, // quantity * purchaseRate
+    discountAmount: { type: Number, required: true }, // (totalAmount * discount) / 100
+    gstAmount: { type: Number, required: true }, // ((totalAmount - discountAmount) * gstPercentage) / 100
+    netAmount: { type: Number, required: true } // totalAmount - discountAmount + gstAmount
 });
 
 // Main bill schema
@@ -28,6 +33,8 @@ const billSchema = new mongoose.Schema({
     purchaseAmount: { type: Number, required: true },
     totalAmount: { type: Number, required: true },
     discountAmount: { type: Number, required: true },
+    gstAmount: { type: Number, required: true }, // Total GST amount for all items
+    netAmount: { type: Number, required: true }, // Total net amount for all items
     email: { type: String, required: true } // Added for inventory association
 }, {
     timestamps: true

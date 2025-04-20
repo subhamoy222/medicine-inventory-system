@@ -5,7 +5,7 @@ import SaleBill from '../models/SaleBillModel.js';
 import mongoose from 'mongoose';
 import Inventory from '../models/Inventory.js'; // Adjust the path as needed
 import CustomerPurchase from "../models/CustomerPurchase.js"; // Adjust the path if necessary
-import ReturnBill from '../models/ReturnBillSchema.js';  // Adjust the path if necessary
+
 import { validateGSTNumber } from '../utils/validators.js';
 
 
@@ -22,16 +22,47 @@ let inventory = {}; // Use an object to store item counts, keyed by itemName
 export const createPurchaseBill = async (req, res) => {
     const {
         purchaseAmount, totalAmount, discountAmount, date,
-        supplierInvoiceNumber, receiptNumber, partyName, items,email
+        supplierInvoiceNumber, receiptNumber, partyName, items, email
     } = req.body;
+    
     console.log(req.body)
     try {
+        // Calculate amounts for each item
+        let totalGSTAmount = 0;
+        let totalNetAmount = 0;
+
+        // Process each item to calculate required fields
+        for (const item of items) {
+            const { quantity, purchaseRate, discount, gstPercentage } = item;
+            
+            // Calculate item total amount (quantity * purchase rate)
+            item.totalAmount = quantity * purchaseRate;
+            
+            // Calculate discount amount on total amount
+            item.discountAmount = (item.totalAmount * discount) / 100;
+            
+            // Calculate amount after discount
+            const amountAfterDiscount = item.totalAmount - item.discountAmount;
+            
+            // Calculate GST amount on discounted amount
+            item.gstAmount = (amountAfterDiscount * gstPercentage) / 100;
+            
+            // Calculate net amount for this item
+            item.netAmount = amountAfterDiscount + item.gstAmount;
+
+            // Update totals
+            totalGSTAmount += item.gstAmount;
+            totalNetAmount += item.netAmount;
+        }
+
         // Create the purchase bill with billType
         const purchaseBill = new Bill({
             billType: 'purchase',  // Set the bill type to 'purchase'
             purchaseAmount,
             totalAmount,
             discountAmount,
+            gstAmount: totalGSTAmount,
+            netAmount: totalNetAmount,
             date,
             supplierInvoiceNumber,
             receiptNumber,
@@ -39,8 +70,7 @@ export const createPurchaseBill = async (req, res) => {
             items,
             email
         });
-       
-
+        
         // Save the purchase bill
         const savedPurchaseBill = await purchaseBill.save();
         console.log("purchae bill",savedPurchaseBill)
@@ -91,6 +121,8 @@ export const createPurchaseBill = async (req, res) => {
 export const createSaleBill = async (req, res) => {
   try {
     const { saleInvoiceNumber, date, receiptNumber, partyName, items, email } = req.body;
+    
+    console.log('Creating sale bill with email:', email);
     
     // Validate required fields
     if (!saleInvoiceNumber || !date || !receiptNumber || !partyName || !items || !items.length || !email) {
@@ -192,6 +224,8 @@ export const createSaleBill = async (req, res) => {
       email,
       gstNo // Store GST number with the bill
     });
+
+    console.log('Saving sale bill:', newBill);
 
     const savedBill = await newBill.save();
 
@@ -735,5 +769,130 @@ export const getNextInvoiceNumber = async (req, res) => {
     });
   }
 };
+
+// Get detailed sales information for a specific medicine
+export const getMedicineSalesDetails = async (req, res) => {
+    try {
+        const { medicineName, startDate, endDate, partyName } = req.query;
+        const email = req.user.email; // Get email from authenticated user
+        
+        console.log('Query parameters:', { medicineName, startDate, endDate, partyName });
+        console.log('User email:', email);
+
+        // First, let's check if there are any sale bills for this user
+        const allUserBills = await SaleBill.find({ email });
+        console.log('Total bills for user:', allUserBills.length);
+        console.log('Sample bill data:', allUserBills[0] ? {
+            partyName: allUserBills[0].partyName,
+            items: allUserBills[0].items.map(item => ({
+                itemName: item.itemName,
+                quantity: item.quantity
+            }))
+        } : 'No bills found');
+
+        // Build the query with case-insensitive medicine name search
+        const query = {
+            email,
+            'items.itemName': { $regex: medicineName, $options: 'i' }
+        };
+
+        // Add date range if provided, otherwise use a wide range
+        if (startDate && endDate) {
+            query.date = {
+                $gte: new Date(startDate),
+                $lte: new Date(endDate)
+            };
+        } else {
+            // If no date range provided, use last 5 years
+            const fiveYearsAgo = new Date();
+            fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
+            query.date = {
+                $gte: fiveYearsAgo,
+                $lte: new Date()
+            };
+        }
+
+        // Add party name if provided
+        if (partyName) {
+            query.partyName = { $regex: partyName, $options: 'i' };
+        }
+
+        console.log('MongoDB query:', JSON.stringify(query, null, 2));
+
+        // Find sale bills
+        const saleBills = await SaleBill.find(query);
+        console.log('Number of bills found:', saleBills.length);
+        console.log('Found bills:', saleBills.map(bill => ({
+            partyName: bill.partyName,
+            date: bill.date,
+            items: bill.items.map(item => ({
+                itemName: item.itemName,
+                quantity: item.quantity
+            }))
+        })));
+
+        if (saleBills.length === 0) {
+            return res.status(404).json({ 
+                message: 'No sales found for the specified criteria',
+                query: query,
+                totalBillsForUser: allUserBills.length
+            });
+        }
+
+        // Process the results
+        const results = {
+            totalQuantity: 0,
+            totalAmount: 0,
+            totalDiscount: 0,
+            salesByParty: {},
+            salesByDate: {}
+        };
+
+        saleBills.forEach(bill => {
+            bill.items.forEach(item => {
+                if (item.itemName.toLowerCase().includes(medicineName.toLowerCase())) {
+                    results.totalQuantity += item.quantity;
+                    const itemTotal = item.quantity * item.mrp;
+                    const itemDiscount = (itemTotal * item.discount) / 100;
+                    results.totalAmount += itemTotal;
+                    results.totalDiscount += itemDiscount;
+
+                    // Group by party
+                    if (!results.salesByParty[bill.partyName]) {
+                        results.salesByParty[bill.partyName] = {
+                            quantity: 0,
+                            amount: 0,
+                            discount: 0
+                        };
+                    }
+                    results.salesByParty[bill.partyName].quantity += item.quantity;
+                    results.salesByParty[bill.partyName].amount += itemTotal;
+                    results.salesByParty[bill.partyName].discount += itemDiscount;
+
+                    // Group by date
+                    const dateStr = bill.date.toISOString().split('T')[0];
+                    if (!results.salesByDate[dateStr]) {
+                        results.salesByDate[dateStr] = {
+                            quantity: 0,
+                            amount: 0,
+                            discount: 0
+                        };
+                    }
+                    results.salesByDate[dateStr].quantity += item.quantity;
+                    results.salesByDate[dateStr].amount += itemTotal;
+                    results.salesByDate[dateStr].discount += itemDiscount;
+                }
+            });
+        });
+
+        res.json(results);
+    } catch (error) {
+        console.error('Error in getMedicineSalesDetails:', error);
+        res.status(500).json({ message: 'Error fetching medicine sales details', error: error.message });
+    }
+};
+
+// Export all functions
+export {};
 
 

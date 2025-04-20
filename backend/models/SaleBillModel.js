@@ -6,7 +6,7 @@ const saleBillSchema = new mongoose.Schema(
         date: { type: Date, required: true, default: Date.now },
         receiptNumber: { type: String, required: true },
         partyName: { type: String, required: true },
-        email: { type: String, required: true }, // Seller's email
+        email: { type: String, required: true }, // Changed from userId to email
 
         items: [
             {
