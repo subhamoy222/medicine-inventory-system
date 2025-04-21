@@ -1,58 +1,118 @@
-import React, { useEffect, useState } from 'react';
+// In MedicineSalesSummary.js - Full corrected code
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
 
-const Reports = () => {
-    const [reports, setReports] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+// Create axios instance with interceptors
+const api = axios.create({
+  baseURL: 'http://localhost:5000/api/bills/medicine-sales'
+});
 
-    useEffect(() => {
-        const fetchReports = async () => {
-            try {
-                const response = await axios.get('/api/reports'); // Adjust the endpoint as needed
-                setReports(response.data);
-            } catch (err) {
-                setError('Failed to fetch reports');
-            } finally {
-                setLoading(false);
-            }
-        };
+const MedicineSalesSummary = () => {
+  const navigate = useNavigate();
+  const [filters, setFilters] = useState({
+    medicineName: '',
+    startDate: '',
+    endDate: '',
+    partyName: ''
+  });
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-        fetchReports();
-    }, []);
+  // Add request interceptor
+  useEffect(() => {
+    const interceptor = api.interceptors.request.use(config => {
+      const token = localStorage.getItem('authToken');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      return config;
+    });
 
-    if (loading) return <div>Loading reports...</div>;
-    if (error) return <div>{error}</div>;
+    return () => api.interceptors.request.eject(interceptor);
+  }, []);
 
-    return (
-        <div className="container mx-auto p-4">
-            <h1 className="text-2xl font-bold mb-4">Reports</h1>
-            {reports.length === 0 ? (
-                <p>No reports available.</p>
-            ) : (
-                <table className="min-w-full bg-white border border-gray-300">
-                    <thead>
-                        <tr>
-                            <th className="border px-4 py-2">Report ID</th>
-                            <th className="border px-4 py-2">Report Type</th>
-                            <th className="border px-4 py-2">Date</th>
-                            <th className="border px-4 py-2">Details</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {reports.map(report => (
-                            <tr key={report.id}>
-                                <td className="border px-4 py-2">{report.id}</td>
-                                <td className="border px-4 py-2">{report.type}</td>
-                                <td className="border px-4 py-2">{new Date(report.date).toLocaleDateString()}</td>
-                                <td className="border px-4 py-2">{report.details}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            )}
-        </div>
-    );
+  // Authorization check
+  useEffect(() => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      toast.error('Please login to access this page');
+      navigate('/login');
+    }
+  }, [navigate]);
+
+  const fetchSummary = async () => {
+    try {
+      setLoading(true);
+      if (!filters.medicineName) {
+        toast.error('Medicine name is required');
+        return;
+      }
+
+      const params = {
+        medicineName: filters.medicineName.trim(),
+        ...(filters.startDate && { startDate: filters.startDate }),
+        ...(filters.endDate && { endDate: filters.endDate }),
+        ...(filters.partyName && { partyName: filters.partyName.trim() })
+      };
+
+      const res = await api.get('/bills/medicine-sales', { params });
+      
+      // Transform data for display
+      const transformedData = {
+        totalQuantity: res.data.totalSales,
+        salesByParty: res.data.salesDetails.reduce((acc, sale) => {
+          acc[sale.partyName] = {
+            quantity: sale.quantity,
+            amount: sale.mrp * sale.quantity,
+            discount: sale.discount
+          };
+          return acc;
+        }, {}),
+        salesByDate: res.data.salesDetails.reduce((acc, sale) => {
+          const date = new Date(sale.date).toISOString().split('T')[0];
+          acc[date] = {
+            quantity: sale.quantity,
+            amount: sale.mrp * sale.quantity,
+            discount: sale.discount
+          };
+          return acc;
+        }, {})
+      };
+
+      setResult(transformedData);
+    } catch (error) {
+      handleApiError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApiError = (error) => {
+    if (error.response?.status === 401) {
+      toast.error('Session expired. Please login again');
+      localStorage.removeItem('authToken');
+      navigate('/login');
+    } else {
+      toast.error(error.response?.data?.message || 'Failed to fetch data');
+    }
+  };
+
+  const handleFilterChange = (e) => {
+    setFilters(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }));
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto p-6">
+      <h1 className="text-3xl font-bold mb-2 text-blue-600">Medicine Sales Summary</h1>
+      
+      {/* Filter inputs and results display */}
+    </div>
+  );
 };
 
-export default Reports;
+export default MedicineSalesSummary;
