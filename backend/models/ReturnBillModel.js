@@ -1,32 +1,73 @@
 import mongoose from 'mongoose';
 
-const returnBillSchema = new mongoose.Schema(
-    {
-        returnInvoiceNumber: { type: String, required: true }, // Unique identifier for return bills
-        originalInvoiceNumber: { type: String, required: true }, // Reference to original sale bill
-        date: { type: Date, required: true, default: Date.now },
-        partyName: { type: String, required: true },
-        email: { type: String, required: true }, // Seller's email
-        gstNumber: { type: String },
-
-        items: [
-            {
-                itemName: { type: String, required: true },
-                batch: { type: String, required: true },
-                quantity: { type: Number, required: true },
-                mrp: { type: Number, required: true },
-                discount: { type: Number, default: 0 }, // Discount in percentage
-                returnReason: { type: String, required: true },
-            },
-        ],
-
-        totalAmount: { type: Number, required: true }, // Sum of (quantity * mrp) for all items
-        discountAmount: { type: Number, default: 0 }, // Total discount amount
-        netAmount: { type: Number, required: true }, // totalAmount - discountAmount
+const returnBillSchema = new mongoose.Schema({
+    returnInvoiceNumber: {
+        type: String,
+        required: true,
+        unique: true
     },
-    { timestamps: true }
-);
+    originalBillNumber: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Bill',
+        
+    },
+    date: {
+        type: Date,
+        required: true
+    },
+    receiptNumber: {
+        type: String,
+        required: true
+    },
+    customerName: {
+        type: String,
+        required: true
+    },
+    items: [{
+        itemName: {
+            type: String,
+            required: true
+        },
+        batch: {
+            type: String,
+            required: true
+        },
+        quantity: {
+            type: Number,
+            required: true
+        },
+        discount: {
+            type: Number,
+            default: 0
+        },
+        amount: {
+            type: Number,
+            required: true
+        }
+    }],
+    totalAmount: {
+        type: Number,
+        required: true
+    },
+    totalDiscount: {
+        type: Number,
+        default: 0
+    },
+    gstAmount: {
+        type: Number,
+        default: 0
+    },
+    netAmount: {
+        type: Number,
+        required: true
+    },
+    email: {
+        type: String,
+        required: true
+    }
+}, {
+    timestamps: true
+});
 
 const ReturnBill = mongoose.model('ReturnBill', returnBillSchema);
-
 export default ReturnBill; 

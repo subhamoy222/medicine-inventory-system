@@ -15,6 +15,7 @@ const saleBillSchema = new mongoose.Schema(
                 quantity: { type: Number, required: true },
                 mrp: { type: Number, required: true },
                 discount: { type: Number, default: 0 }, // Discount in percentage
+                expiryDate: { type: Date, required: true } // Added expiry date field
             },
         ],
 

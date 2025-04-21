@@ -5,7 +5,7 @@ import SaleBill from '../models/SaleBillModel.js';
 import mongoose from 'mongoose';
 import Inventory from '../models/Inventory.js'; // Adjust the path as needed
 import CustomerPurchase from "../models/CustomerPurchase.js"; // Adjust the path if necessary
-import ReturnBill from '../models/ReturnBillSchema.js';  // Adjust the path if necessary
+import ReturnBill from '../models/returnBillModel.js';  // Fixed import path
 import { validateGSTNumber } from '../utils/validators.js';
 
 
@@ -211,12 +211,26 @@ export const createSaleBill = async (req, res) => {
             date,
             receiptNumber,
             partyName,
-            items: items.map(item => ({
-                ...item,
-                quantity: Number(item.quantity),
-                mrp: Number(item.mrp),
-                discount: Number(item.discount),
-                amount: Number(item.quantity) * Number(item.mrp),
+            items: await Promise.all(items.map(async (item) => {
+                // Get the inventory item to get its expiry date
+                const inventoryItem = await Inventory.findOne({
+                    email,
+                    itemName: item.itemName,
+                    batch: item.batch
+                });
+
+                if (!inventoryItem) {
+                    throw new Error(`Inventory item not found for ${item.itemName} (${item.batch})`);
+                }
+
+                return {
+                    ...item,
+                    quantity: Number(item.quantity),
+                    mrp: Number(item.mrp),
+                    discount: Number(item.discount),
+                    amount: Number(item.quantity) * Number(item.mrp),
+                    expiryDate: inventoryItem.expiryDate // Include expiry date from inventory
+                };
             })),
             totalAmount,
             discountAmount,
@@ -337,128 +351,298 @@ export const getPurchaseHistory = async (req, res) => {
 
 export const createReturnBill = async (req, res) => {
     try {
-        const { 
-            returnInvoiceNumber,
-            originalInvoiceNumber,
-            partyName,
-            gstNumber,
-            items
+        const {
+            date,
+            receiptNumber,
+            customerName,
+            items,
+            email,
+            originalBillNumber
         } = req.body;
-        
-        const email = req.user.email;
 
         // Validate required fields
-        if (!returnInvoiceNumber || !originalInvoiceNumber || !partyName || !items?.length) {
-            return res.status(400).json({ 
-                success: false,
-                message: "Return invoice number, original invoice number, party name, and items are required" 
-            });
+        if (!date || !receiptNumber || !customerName || !items || !email) {
+            return res.status(400).json({ message: 'All fields are required' });
         }
 
-        // Find original sale bill
-        const originalBill = await SaleBill.findOne({ 
-            saleInvoiceNumber: originalInvoiceNumber,
-            email: email
-        });
+        // Get total sold quantities for this customer
+        const soldItems = await SaleBill.aggregate([
+            {
+                $match: {
+                    email: email,
+                    partyName: customerName
+                }
+            },
+            {
+                $unwind: '$items'
+            },
+            {
+                $group: {
+                    _id: {
+                        itemName: '$items.itemName',
+                        batch: '$items.batch'
+                    },
+                    totalSold: { $sum: '$items.quantity' },
+                    expiryDate: { $last: '$items.expiryDate' }  // Changed from $first to $last to get most recent
+                }
+            }
+        ]);
 
-        if (!originalBill) {
-            return res.status(404).json({
-                success: false,
-                message: "Original sale bill not found"
-            });
-        }
+        console.log('Sold items aggregation result:', JSON.stringify(soldItems, null, 2));
 
-        const validatedItems = [];
-        let totalAmount = 0;
-        let discountAmount = 0;
+        // Get total returned quantities for this customer
+        const returnedItems = await ReturnBill.aggregate([
+            {
+                $match: {
+                    email: email,
+                    customerName: customerName
+                }
+            },
+            {
+                $unwind: '$items'
+            },
+            {
+                $group: {
+                    _id: {
+                        itemName: '$items.itemName',
+                        batch: '$items.batch'
+                    },
+                    totalReturned: { $sum: '$items.quantity' }
+                }
+            }
+        ]);
 
-        // Validate each item
+        // Create a map for easy lookup of returned quantities
+        const returnedQuantityMap = new Map(
+            returnedItems.map(item => [
+                `${item._id.itemName}-${item._id.batch}`,
+                item.totalReturned
+            ])
+        );
+
+        // Create a map for sold items data
+        const soldItemsMap = new Map(
+            soldItems.map(item => [
+                `${item._id.itemName}-${item._id.batch}`,
+                {
+                    totalSold: item.totalSold,
+                    expiryDate: item.expiryDate
+                }
+            ])
+        );
+
+        // Validate each return item
         for (const item of items) {
-            const { itemName, batch, quantity, mrp, discount, returnReason } = item;
-            
-            // Check if item exists in original bill
-            const originalItem = originalBill.items.find(
-                i => i.itemName === itemName && i.batch === batch
-            );
+            const key = `${item.itemName}-${item.batch}`;
+            const soldData = soldItemsMap.get(key);
+            const returnedQuantity = returnedQuantityMap.get(key) || 0;
 
-            if (!originalItem) {
-                return res.status(400).json({
-                    success: false,
-                    message: `${itemName} (${batch}) not found in original bill`
-                });
-            }
-
-            // Validate quantity
-            if (quantity > originalItem.quantity) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Return quantity cannot exceed original purchase quantity`
-                });
-            }
-
-            const itemTotal = quantity * mrp;
-            const itemDiscount = (itemTotal * discount) / 100;
-            
-            validatedItems.push({
-                itemName,
-                batch,
-                quantity,
-                mrp,
-                discount,
-                returnReason
+            console.log('Validating item:', {
+                itemName: item.itemName,
+                batch: item.batch,
+                soldData: soldData,
+                returnedQuantity: returnedQuantity
             });
 
-            totalAmount += itemTotal;
-            discountAmount += itemDiscount;
+            // Check if item was actually sold to this customer
+            if (!soldData) {
+                return res.status(400).json({
+                    message: `Item ${item.itemName} (Batch: ${item.batch}) was not sold to this customer`
+                });
+            }
+
+            // Calculate returnable quantity
+            const returnableQuantity = soldData.totalSold - returnedQuantity;
+
+            // Validate return quantity
+            if (item.quantity > returnableQuantity) {
+                return res.status(400).json({
+                    message: `Cannot return ${item.quantity} units of ${item.itemName} (Batch: ${item.batch}). Maximum returnable quantity is ${returnableQuantity}`
+                });
+            }
+
+            // Get expiry date from the original sale bill
+            console.log('Searching for sale bill with criteria:', {
+                email,
+                customerName,
+                itemDetails: {
+                    itemName: item.itemName,
+                    batch: item.batch
+                }
+            });
+
+            // First try to get expiry date from inventory
+            const inventoryItem = await Inventory.findOne({
+                email,
+                itemName: { $regex: new RegExp('^' + item.itemName + '$', 'i') },
+                batch: { $regex: new RegExp('^' + item.batch + '$', 'i') }
+            });
+
+            console.log('Inventory item found:', inventoryItem ? {
+                itemName: inventoryItem.itemName,
+                batch: inventoryItem.batch,
+                expiryDate: inventoryItem.expiryDate
+            } : 'No inventory item found');
+
+            // Find all sale bills for this item
+            const saleBills = await SaleBill.find({
+                email,
+                partyName: customerName,
+                'items.itemName': { $regex: new RegExp('^' + item.itemName + '$', 'i') },
+                'items.batch': { $regex: new RegExp('^' + item.batch + '$', 'i') }
+            }).sort({ date: -1 }); // Get most recent first
+
+            console.log('Sale bills found:', saleBills.map(bill => ({
+                id: bill._id,
+                date: bill.date,
+                items: bill.items.filter(i => 
+                    i.itemName.toLowerCase() === item.itemName.toLowerCase() &&
+                    i.batch.toLowerCase() === item.batch.toLowerCase()
+                )
+            })));
+
+            // Get expiry date from either inventory or sale bills
+            let expiryDate;
+            if (inventoryItem && inventoryItem.expiryDate) {
+                expiryDate = new Date(inventoryItem.expiryDate);
+            } else if (saleBills.length > 0) {
+                // Try to find expiry date in any of the sale bills
+                for (const bill of saleBills) {
+                    const saleItem = bill.items.find(i =>
+                        i.itemName.toLowerCase() === item.itemName.toLowerCase() &&
+                        i.batch.toLowerCase() === item.batch.toLowerCase()
+                    );
+                    if (saleItem && saleItem.expiryDate) {
+                        expiryDate = new Date(saleItem.expiryDate);
+                        break;
+                    }
+                }
+            }
+
+            if (!expiryDate) {
+                // If no expiry date found, we'll need to update the sale bills with the current inventory expiry date
+                if (inventoryItem) {
+                    // Update all sale bills for this item with the inventory expiry date
+                    await SaleBill.updateMany(
+                        {
+                            email,
+                            'items.itemName': { $regex: new RegExp('^' + item.itemName + '$', 'i') },
+                            'items.batch': { $regex: new RegExp('^' + item.batch + '$', 'i') }
+                        },
+                        {
+                            $set: {
+                                'items.$.expiryDate': inventoryItem.expiryDate
+                            }
+                        }
+                    );
+                    expiryDate = new Date(inventoryItem.expiryDate);
+                } else {
+                    return res.status(400).json({
+                        message: `Cannot verify expiry date for ${item.itemName} (Batch: ${item.batch}). Item not found in inventory.`
+                    });
+                }
+            }
+
+            const currentDate = new Date();
+
+            console.log('Date validation:', {
+                itemName: item.itemName,
+                batch: item.batch,
+                expiryDate: expiryDate,
+                currentDate: currentDate,
+                isExpired: expiryDate < currentDate
+            });
+
+            if (expiryDate < currentDate) {
+                return res.status(400).json({
+                    message: `Cannot return expired item ${item.itemName} (Batch: ${item.batch}). Expiry date: ${expiryDate.toISOString().split('T')[0]}`
+                });
+            }
         }
 
-        const netAmount = totalAmount - discountAmount;
+        // Calculate totals
+        const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+        const totalDiscount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
+        const gstAmount = totalAmount * 0.18; // Assuming 18% GST
+        const netAmount = totalAmount - totalDiscount + gstAmount;
+
+        // Generate return invoice number
+        const returnInvoiceNumber = `RET${Date.now().toString().slice(-6)}`;
 
         // Create return bill
         const returnBill = new ReturnBill({
             returnInvoiceNumber,
-            originalInvoiceNumber,
-            date: new Date(),
-            partyName,
-            email,
-            gstNumber,
-            items: validatedItems,
+            originalBillNumber,
+            date,
+            receiptNumber,
+            customerName,
+            items,
             totalAmount,
-            discountAmount,
-            netAmount
+            totalDiscount,
+            gstAmount,
+            netAmount,
+            email
         });
 
         await returnBill.save();
 
         // Update inventory
-        for (const item of validatedItems) {
-            const inventoryItem = await Inventory.findOne({
-                itemName: item.itemName,
-                batch: item.batch,
-                email: email
-            });
-
-            if (inventoryItem) {
-                inventoryItem.quantity += item.quantity;
-                await inventoryItem.save();
-            }
+        for (const item of items) {
+            await Inventory.findOneAndUpdate(
+                { 
+                    itemName: item.itemName, 
+                    batch: item.batch,
+                    email
+                },
+                { $inc: { quantity: item.quantity } }
+            );
         }
 
-        res.status(201).json({
-            success: true,
-            message: "Return bill created successfully",
-            data: returnBill
-        });
+        // Update customer purchase history to reflect return
+        await CustomerPurchase.findOneAndUpdate(
+            { 
+                customerName: customerName,
+                'purchaseHistory.items.itemName': items[0].itemName,
+                'purchaseHistory.items.batch': items[0].batch
+            },
+            {
+                $inc: {
+                    'purchaseHistory.$.items.$[item].quantity': -items[0].quantity
+                }
+            },
+            {
+                arrayFilters: [
+                    { 'item.itemName': items[0].itemName, 'item.batch': items[0].batch }
+                ]
+            }
+        );
 
-    } catch (error) {
-        console.error("Error creating return bill:", error);
-        res.status(500).json({
-            success: false,
-            message: "Error creating return bill",
-            error: error.message
+        res.status(201).json({
+            message: 'Return bill created successfully',
+            returnBill,
+            returnableQuantities: Object.fromEntries(
+                items.map(item => {
+                    const key = `${item.itemName}-${item.batch}`;
+                    const soldData = soldItemsMap.get(key);
+                    const returnedQuantity = returnedQuantityMap.get(key) || 0;
+                    return [
+                        key,
+                        {
+                            originalSold: soldData.totalSold,
+                            previouslyReturned: returnedQuantity,
+                            currentReturn: item.quantity,
+                            remainingReturnable: soldData.totalSold - returnedQuantity - item.quantity
+                        }
+                    ]
+                })
+            )
         });
+    } catch (error) {
+        console.error('Error in createReturnBill:', error);
+        res.status(500).json({ message: error.message });
     }
 };
+
 // Fetch batch details for a specific customer and medicine
 // export const getBatchDetails = async (req, res) => {
 //   const { customerName, itemName } = req.query;
@@ -792,52 +976,39 @@ export const getMedicineSalesDetails = async (req, res) => {
             return res.status(400).json({ message: 'Medicine name is required' });
         }
 
-        // Set default date range if not provided
-        const defaultStartDate = new Date();
-        defaultStartDate.setFullYear(defaultStartDate.getFullYear() - 5); // Last 5 years
-        const queryStartDate = startDate ? new Date(startDate) : defaultStartDate;
-        const queryEndDate = endDate ? new Date(endDate) : new Date();
-
-        console.log('Date range:', {
-            start: queryStartDate,
-            end: queryEndDate
-        });
-
-        // First, let's check if there are any sale bills for this user
-        const allUserBills = await SaleBill.find({
-            $or: [
-                { userId: userId },
-                { email: email }
-            ]
-        });
-
-        console.log(`Total bills for user (${userId}/${email}):`, allUserBills.length);
-        if (allUserBills.length > 0) {
-            console.log('Sample bill items:', allUserBills[0].items.map(item => ({
-                itemName: item.itemName,
-                batch: item.batch
-            })));
-        }
-
-        // Construct the query
+        // Build the base query
         const query = {
-            $or: [
-                { userId: userId },
-                { email: email }
-            ],
-            'items.itemName': { $regex: new RegExp(medicineName, 'i') },
-            date: {
-                $gte: queryStartDate,
-                $lte: queryEndDate
-            }
+            $and: [
+                {
+                    $or: [
+                        { userId: userId },
+                        { email: email }
+                    ]
+                },
+                {
+                    'items.itemName': { $regex: new RegExp(medicineName, 'i') }
+                }
+            ]
         };
 
-        // Add party name filter if provided
-        if (partyName) {
-            query.partyName = { $regex: new RegExp(partyName, 'i') };
+        // Add date range filter if provided
+        if (startDate || endDate) {
+            query.$and.push({
+                date: {
+                    ...(startDate && { $gte: new Date(startDate) }),
+                    ...(endDate && { $lte: new Date(endDate) })
+                }
+            });
         }
 
-        console.log('Searching with query:', JSON.stringify(query, null, 2));
+        // Add party name filter if provided - using exact match
+        if (partyName) {
+            query.$and.push({
+                partyName: partyName // Exact match for party name
+            });
+        }
+
+        console.log('MongoDB Query:', JSON.stringify(query, null, 2));
 
         // Find all sale bills matching the criteria
         const saleBills = await SaleBill.find(query);
@@ -848,85 +1019,237 @@ export const getMedicineSalesDetails = async (req, res) => {
             return res.status(404).json({ 
                 message: 'No sales found for the specified criteria',
                 debug: {
-                    totalUserBills: allUserBills.length,
-                    medicineName,
-                    dateRange: {
-                        start: queryStartDate,
-                        end: queryEndDate
-                    },
-                    partyName
+                    query: query,
+                    filters: {
+                        medicineName,
+                        dateRange: {
+                            start: startDate,
+                            end: endDate
+                        },
+                        partyName
+                    }
                 }
             });
         }
 
         // Calculate total sales and prepare response
-        const totalSales = saleBills.reduce((sum, bill) => {
-            const item = bill.items.find(item => 
-                item.itemName.toLowerCase().includes(medicineName.toLowerCase())
-            );
-            return sum + (item ? item.quantity : 0);
-        }, 0);
+        let totalQuantity = 0;
+        let totalAmount = 0;
+        let totalDiscount = 0;
 
         // Prepare detailed response
         const salesDetails = saleBills.map(bill => {
-            const item = bill.items.find(item => 
+            // Find matching items in the bill
+            const matchingItems = bill.items.filter(item => 
                 item.itemName.toLowerCase().includes(medicineName.toLowerCase())
             );
-            return {
+
+            // Calculate totals for matching items
+            matchingItems.forEach(item => {
+                totalQuantity += item.quantity;
+                totalAmount += (item.quantity * item.mrp);
+                totalDiscount += (item.discount || 0);
+            });
+
+            // Return sale details for each matching item
+            return matchingItems.map(item => ({
                 saleInvoiceNumber: bill.saleInvoiceNumber,
                 date: bill.date,
                 partyName: bill.partyName,
-                quantity: item ? item.quantity : 0,
-                mrp: item ? item.mrp : 0,
-                discount: item ? item.discount : 0,
-                gstNo: item ? item.gstNo : ''
-            };
-        });
+                quantity: item.quantity,
+                mrp: item.mrp,
+                discount: item.discount || 0,
+                gstNo: item.gstNo || '',
+                batch: item.batch || ''
+            }));
+        }).flat(); // Flatten the array of arrays
 
         res.status(200).json({
-            totalSales,
-            salesDetails
+            totalSales: totalQuantity,
+            totalAmount,
+            totalDiscount,
+            salesDetails,
+            summary: {
+                totalQuantity,
+                totalAmount,
+                totalDiscount,
+                averagePrice: totalQuantity > 0 ? (totalAmount / totalQuantity).toFixed(2) : 0
+            },
+            debug: {
+                appliedFilters: {
+                    medicineName,
+                    startDate,
+                    endDate,
+                    partyName
+                },
+                resultCount: salesDetails.length,
+                query: query
+            }
         });
     } catch (error) {
         console.error('Error in getMedicineSalesDetails:', error);
-        res.status(500).json({ message: 'Server error', error: error.message });
+        res.status(500).json({ 
+            message: 'Server error', 
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 };
 
+
+
+// Controller to get filtered purchase history
 export const getPurchaseBillHistory = async (req, res) => {
   try {
-    const { startDate, endDate, partyName, itemName, email } = req.query;
+    const { fromDate, toDate, partyName, medicineName } = req.query;
+    const userEmail = req.user.email; // Extract email from authenticated user
 
-    const filter = { billType: 'purchase', email }; // Always filter by purchase bills for this endpoint
+    // Step 1: Base filter for purchase bills of the logged-in user
+    const filter = {
+      billType: 'purchase',
+      email: userEmail,
+    };
 
-    if (startDate && endDate) {
+    // Step 2: Add optional filters
+
+    // Filter by date range if provided
+    if (fromDate && toDate) {
       filter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
+        $gte: new Date(fromDate), // Greater than or equal to fromDate
+        $lte: new Date(toDate),   // Less than or equal to toDate
       };
     }
 
+    // Filter by party name if provided
     if (partyName) {
-      filter.partyName = { $regex: new RegExp(partyName, 'i') }; // case-insensitive match
+      filter.partyName = { $regex: new RegExp(partyName, 'i') }; // Case-insensitive search
     }
 
-    if (itemName) {
-      filter['items.itemName'] = { $regex: new RegExp(itemName, 'i') }; // case-insensitive
+    // Step 3: Fetch filtered bills
+    const allBills = await Bill.find(filter);
+
+    let filteredBills = allBills;
+
+    // Step 4: Filter by medicine name if provided
+    if (medicineName) {
+      filteredBills = allBills.filter(bill =>
+        bill.items.some(item =>
+          item.itemName.toLowerCase().includes(medicineName.toLowerCase()) // Case-insensitive search for itemName
+        )
+      );
     }
 
-    const bills = await Bill.find(filter).sort({ date: -1 });
-
-    if (!bills.length) {
-      return res.status(404).json({ message: "No purchase bills found matching the criteria." });
+    // Step 5: Return result
+    if (filteredBills.length === 0) {
+      return res.status(404).json({ success: false, message: 'No purchase bills found matching the criteria.' });
     }
 
-    res.status(200).json({ count: bills.length, bills });
-
+    res.status(200).json({ success: true, data: filteredBills });
   } catch (error) {
-    console.error("Error fetching purchase bill history:", error);
-    res.status(500).json({ message: "Internal server error", error: error.message });
+    console.error('Error fetching purchase history:', error);
+    res.status(500).json({ success: false, message: 'Server error while fetching purchase history.' });
   }
 };
 
+// Get sale bill details for return
+export const getSaleBillDetails = async (req, res) => {
+    try {
+        const { billId } = req.params;
+        const bill = await Bill.findById(billId);
+        
+        if (!bill) {
+            return res.status(404).json({ message: 'Sale bill not found' });
+        }
 
+        res.json(bill);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
 
+// Get medicines by party name
+export const getMedicinesByParty = async (req, res) => {
+    try {
+        const { partyName } = req.query;
+        const email = req.user?.email || req.query.email;
+        
+        console.log('Request parameters:', { partyName, email });
+        
+        if (!email) {
+            return res.status(400).json({ message: 'Email is required' });
+        }
+
+        // Find all sale bills for this email and exact party name
+        const saleBills = await SaleBill.find({ 
+            email: email.toLowerCase(),
+            partyName: partyName // Exact match for party name
+        });
+
+        console.log('Total bills found for email and party:', saleBills.length);
+
+        // If no bills found at all, return early
+        if (saleBills.length === 0) {
+            return res.status(404).json({ 
+                message: 'No sales found for this party',
+                debug: {
+                    email,
+                    partyName,
+                    totalBills: 0
+                }
+            });
+        }
+
+        // Aggregate medicines and their quantities
+        const medicineMap = new Map();
+        
+        saleBills.forEach(bill => {
+            bill.items.forEach(item => {
+                const key = `${item.itemName}-${item.batch}`;
+                if (medicineMap.has(key)) {
+                    const existing = medicineMap.get(key);
+                    const newQuantity = existing.quantity + item.quantity;
+                    const newAmount = existing.totalAmount + (item.quantity * item.mrp);
+                    
+                    // Update the entry with new totals and weighted average MRP
+                    medicineMap.set(key, {
+                        itemName: item.itemName,
+                        batch: item.batch,
+                        quantity: newQuantity,
+                        mrp: newAmount / newQuantity, // Calculate weighted average MRP
+                        totalAmount: newAmount
+                    });
+                } else {
+                    medicineMap.set(key, {
+                        itemName: item.itemName,
+                        batch: item.batch,
+                        quantity: item.quantity,
+                        mrp: item.mrp,
+                        totalAmount: item.quantity * item.mrp
+                    });
+                }
+            });
+        });
+
+        // Convert Map to array and sort by medicine name
+        const medicines = Array.from(medicineMap.values())
+            .sort((a, b) => a.itemName.localeCompare(b.itemName));
+
+        // Format numbers to 2 decimal places
+        const formattedMedicines = medicines.map(m => ({
+            ...m,
+            mrp: Number(m.mrp.toFixed(2)),
+            totalAmount: Number(m.totalAmount.toFixed(2))
+        }));
+
+        console.log('Final results:', {
+            totalBills: saleBills.length,
+            medicinesFound: medicines.length,
+            medicines: formattedMedicines
+        });
+
+        res.json(formattedMedicines);
+    } catch (error) {
+        console.error('Error in getMedicinesByParty:', error);
+        res.status(500).json({ message: error.message });
+    }
+};

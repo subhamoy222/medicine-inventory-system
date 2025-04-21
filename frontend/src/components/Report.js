@@ -29,6 +29,9 @@ function MedicineSalesSummary() {
       setError(null);
       
       const token = localStorage.getItem('token');
+      console.log('Fetching sales data with params:', params);
+      console.log('Token present:', !!token);
+      
       const response = await axios.get('http://localhost:5000/api/bills/medicine-sales', {
         params,
         headers: {
@@ -37,6 +40,8 @@ function MedicineSalesSummary() {
         }
       });
 
+      console.log('API Response:', response.data);
+
       if (response.data && response.data.salesDetails) {
         // Extract unique parties from the response data for dropdown
         const uniqueParties = [...new Set(response.data.salesDetails.map(sale => sale.partyName))];
@@ -44,17 +49,30 @@ function MedicineSalesSummary() {
         setSalesData(response.data);
         setError(null);
       } else {
-        setError('No sales data found');
+        console.log('No sales data in response:', response.data);
+        setError('No sales records found for the selected criteria');
         setSalesData(null);
       }
     } catch (err) {
-      console.error('Error in fetchSalesData:', err);
-      setError(err.response?.data?.message || 'Failed to fetch sales data');
+      console.error('Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status
+      });
+      
+      if (err.response?.status === 401) {
+        setError('Please log in to view sales data');
+        navigate('/login');
+      } else if (err.response?.status === 404) {
+        setError('No sales records found for the selected criteria');
+      } else {
+        setError(err.response?.data?.message || 'Failed to fetch sales data. Please try again.');
+      }
       setSalesData(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [navigate]);
 
   // Handle input changes for suggestions only
   const handleInputChange = (e) => {
@@ -347,18 +365,78 @@ function MedicineSalesSummary() {
   }
 
   if (error && !salesData) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex justify-center items-center">
-        <div className="bg-white p-8 rounded-lg shadow-lg text-center">
-          <div className="text-red-500 text-5xl mb-4">⚠️</div>
-          <div className="text-red-500 text-xl font-semibold mb-2">Error</div>
-          <div className="text-gray-700">{error}</div>
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="mt-6 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-200"
-          >
-            Back to Dashboard
-          </button>
+  return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-50 p-8">
+        <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-md p-8">
+          <h1 className="text-2xl font-bold text-indigo-800 mb-6 border-b pb-4">Medicine Sales Summary</h1>
+          
+          <div className="text-center py-8">
+            <div className="mb-4">
+              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M12 20a8 8 0 100-16 8 8 0 000 16z" />
+              </svg>
+            </div>
+            <div className="text-gray-600 text-lg mb-4">{error}</div>
+            <div className="flex justify-center space-x-4">
+              <button
+                onClick={handleResetFilters}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition duration-200"
+              >
+                Reset Filters
+              </button>
+              <button
+                onClick={() => navigate('/dashboard')}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-200"
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+
+          {/* Medicine Name Search */}
+          <div className="mt-8">
+            <label htmlFor="medicineName" className="block text-sm font-medium text-gray-700 mb-2">
+              Try searching for a different medicine
+            </label>
+            <div className="flex space-x-2">
+              <div className="relative flex-grow">
+          <input
+                  ref={inputRef}
+                  id="medicineName"
+            type="text"
+            value={medicineName}
+                  onChange={handleInputChange}
+                  onBlur={handleInputBlur}
+                  onFocus={handleInputFocus}
+                  placeholder="e.g., Paracetamol, Amoxicillin"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200"
+                  autoComplete="off"
+                />
+                {showSuggestions && suggestions.length > 0 && (
+                  <div 
+                    className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    {suggestions.map((suggestion, index) => (
+                      <div
+                        key={index}
+                        onClick={() => handleSuggestionClick(suggestion)}
+                        className="px-4 py-2 hover:bg-indigo-50 cursor-pointer transition duration-150"
+                      >
+                        {suggestion}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={handleSearch}
+                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-lg hover:from-indigo-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-200 shadow-md"
+              >
+                Search
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -377,10 +455,10 @@ function MedicineSalesSummary() {
             </label>
             <div className="flex space-x-2">
               <div className="relative flex-grow">
-                <input
+          <input
                   ref={inputRef}
                   id="medicineName"
-                  type="text"
+            type="text"
                   value={medicineName}
                   onChange={handleInputChange}
                   onBlur={handleInputBlur}
@@ -425,8 +503,8 @@ function MedicineSalesSummary() {
                 </label>
                 <select
                   id="partyName"
-                  value={partyName}
-                  onChange={(e) => setPartyName(e.target.value)}
+            value={partyName}
+            onChange={(e) => setPartyName(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200"
                 >
                   <option value="">All Parties</option>
@@ -434,33 +512,33 @@ function MedicineSalesSummary() {
                     <option key={index} value={party}>{party}</option>
                   ))}
                 </select>
-              </div>
+        </div>
 
-              <div>
+        <div>
                 <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-2">
                   Start Date
                 </label>
-                <input
+          <input
                   id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200"
-                />
-              </div>
+          />
+        </div>
               
-              <div>
+        <div>
                 <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-2">
                   End Date
                 </label>
-                <input
+          <input
                   id="endDate"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200"
-                />
-              </div>
+          />
+        </div>
             </div>
             
             {/* Filter Buttons */}
@@ -471,13 +549,13 @@ function MedicineSalesSummary() {
               >
                 Reset Filters
               </button>
-              <button
+          <button
                 onClick={handleFilterSearch}
                 className="px-5 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg hover:from-green-600 hover:to-teal-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-200 shadow-md"
                 disabled={!medicineName.trim()}
-              >
+          >
                 Apply Filters
-              </button>
+          </button>
             </div>
           </div>
           
@@ -524,8 +602,8 @@ function MedicineSalesSummary() {
               </svg>
               <span>Download PDF</span>
             </button>
-          </div>
-          
+      </div>
+
           {/* Filters Section */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
             <div>
@@ -615,7 +693,7 @@ function MedicineSalesSummary() {
               />
             </div>
           </div>
-          
+
           {/* Filter Buttons */}
           <div className="flex justify-end space-x-3 mb-8">
             <button
@@ -660,11 +738,11 @@ function MedicineSalesSummary() {
               </div>
               <div className="text-sm opacity-80 mt-2">Per Unit</div>
             </div>
+            </div>
           </div>
-        </div>
 
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          <div className="overflow-x-auto">
+            <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gradient-to-r from-indigo-600 to-blue-600 text-white">
                 <tr>
@@ -719,11 +797,11 @@ function MedicineSalesSummary() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
                     ₹{salesData.salesDetails.reduce((sum, sale) => sum + (sale.mrp * sale.quantity - sale.discount), 0).toFixed(2)}
                   </td>
-                </tr>
+                    </tr>
               </tfoot>
-            </table>
+              </table>
+            </div>
           </div>
-        </div>
 
         <div className="mt-8 flex justify-between">
           <button

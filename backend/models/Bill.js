@@ -9,8 +9,11 @@ const itemSchema = new mongoose.Schema({
     mrp: { type: Number, required: true },
     expiryDate: { type: Date, required: true },
     gstPercentage: { type: Number, required: true },
-    pack: { type: String, required: false }, // Optional
-    description: { type: String, required: false } // Optional
+    pack: { type: String, required: false }, // Optional, e.g., "strip", "bottle"
+    description: { type: String, required: false }, // Optional
+    discount: { type: Number, required: false, default: 0 }, // Discount per item
+    gstAmount: { type: Number, required: false }, // Computed GST amount (quantity * gstPercentage * purchaseRate)
+    totalAmount: { type: Number, required: false } // Computed total amount per item
 });
 
 // Main bill schema
@@ -18,7 +21,7 @@ const billSchema = new mongoose.Schema({
     billType: { 
         type: String, 
         required: true, 
-        enum: [ 'purchase', 'return'] // Only 'purchase' is supported here
+        enum: ['purchase', 'return'] // Only 'purchase' is supported here
     },
     supplierInvoiceNumber: { type: String, required: true },
     receiptNumber: { type: String, required: true },
@@ -36,6 +39,49 @@ const billSchema = new mongoose.Schema({
 // Export the model
 const Bill = mongoose.model('Bill', billSchema);
 export default Bill;
+
+
+
+
+
+// import mongoose from 'mongoose';
+
+// // Item schema for individual items in a bill
+// const itemSchema = new mongoose.Schema({
+//     itemName: { type: String, required: true },
+//     batch: { type: String, required: true },
+//     quantity: { type: Number, required: true },
+//     purchaseRate: { type: Number, required: true },
+//     mrp: { type: Number, required: true },
+//     expiryDate: { type: Date, required: true },
+//     gstPercentage: { type: Number, required: true },
+//     pack: { type: String, required: false }, // Optional
+//     description: { type: String, required: false } // Optional
+// });
+
+// // Main bill schema
+// const billSchema = new mongoose.Schema({
+//     billType: { 
+//         type: String, 
+//         required: true, 
+//         enum: [ 'purchase', 'return'] // Only 'purchase' is supported here
+//     },
+//     supplierInvoiceNumber: { type: String, required: true },
+//     receiptNumber: { type: String, required: true },
+//     partyName: { type: String, required: true },
+//     date: { type: Date, required: true },
+//     items: [itemSchema], // Array of items in the bill
+//     purchaseAmount: { type: Number, required: true },
+//     totalAmount: { type: Number, required: true },
+//     discountAmount: { type: Number, required: true },
+//     email: { type: String, required: true } // Added for inventory association
+// }, {
+//     timestamps: true
+// });
+
+// // Export the model
+// const Bill = mongoose.model('Bill', billSchema);
+// export default Bill;
 
 
 // import mongoose from 'mongoose';
