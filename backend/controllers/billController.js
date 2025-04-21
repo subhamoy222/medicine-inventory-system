@@ -5,7 +5,7 @@ import SaleBill from '../models/SaleBillModel.js';
 import mongoose from 'mongoose';
 import Inventory from '../models/Inventory.js'; // Adjust the path as needed
 import CustomerPurchase from "../models/CustomerPurchase.js"; // Adjust the path if necessary
-import ReturnBill from '../models/returnBillModel.js';  // Fixed import path
+import ReturnBill from '../models/ReturnBillModel.js';  // Fixed import path
 import { validateGSTNumber } from '../utils/validators.js';
 
 
