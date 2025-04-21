@@ -114,7 +114,7 @@ function Dashboard() {
     setPartyAnalytics(prev => ({ ...prev, loading: true, error: null }));
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get('http://localhost:5000/api/bills/medicines-by-party', {
+      const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicines-by-party', {
         params: { partyName, email },
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -144,7 +144,7 @@ function Dashboard() {
     if (!email) return;
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get('http://localhost:5000/api/bills/medicine-sales', {
+      const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicine-sales', {
         params: {
           email,
           startDate: new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString(),
@@ -203,7 +203,7 @@ function Dashboard() {
     setPartyMedicines(prev => ({ ...prev, loading: true, error: null, selectedParty: partyName }));
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get('http://localhost:5000/api/bills/medicines-by-party', {
+      const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicines-by-party', {
         params: { 
           partyName,
           email 
@@ -236,7 +236,7 @@ function Dashboard() {
       if (!email) return;
       try {
         const token = localStorage.getItem("token");
-        const response = await axios.get('http://localhost:5000/api/bills/medicine-sales', {
+        const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicine-sales', {
           params: { email },
           headers: {
             'Authorization': `Bearer ${token}`,

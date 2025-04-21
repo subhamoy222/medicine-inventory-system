@@ -15,7 +15,7 @@ const MedicineList = () => {
             const token = localStorage.getItem('token');
             const email = localStorage.getItem('email');
 
-            const response = await axios.get('http://localhost:5000/api/inventory', {
+            const response = await axios.get('https://medicine-inventory-system.onrender.com/api/inventory', {
                 params: { email },
                 headers: {
                     Authorization: `Bearer ${token}`

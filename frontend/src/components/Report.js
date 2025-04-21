@@ -32,7 +32,7 @@ function MedicineSalesSummary() {
       console.log('Fetching sales data with params:', params);
       console.log('Token present:', !!token);
       
-      const response = await axios.get('http://localhost:5000/api/bills/medicine-sales', {
+      const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicine-sales', {
         params,
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -332,7 +332,7 @@ function MedicineSalesSummary() {
 
     const fetchAvailableMedicines = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/inventory', {
+        const response = await axios.get('https://medicine-inventory-system.onrender.com/api/inventory', {
           params: { email },
           headers: {
             'Authorization': `Bearer ${token}`,

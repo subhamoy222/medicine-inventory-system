@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 
 // Create axios instance with interceptors
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api/bills/medicine-sales'
+  baseURL: 'https://medicine-inventory-system.onrender.com/api/bills/medicine-sales'
 });
 
 const MedicineSalesSummary = () => {
