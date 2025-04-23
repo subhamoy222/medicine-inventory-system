@@ -12,6 +12,7 @@ import PurchaseBillForm from './components/PurchaseBillForm'; // Ensure this is 
 import SellBillForm from './components/SellBillForm'; // Ensure this is created
 import ReturnBillOptions from './components/ReturnBillOptions';
 import PurchaseReturnForm from './components/PurchaseReturnForm';
+import PurchaseReturnSearch from './components/PurchaseReturnSearch';
 import SaleReturnForm from './components/SaleReturnForm';
 import ExpiryBillForm from './components/ExpiryBillForm';
 import BillGenerationDocs from './components/BillGenerationDocs';
@@ -46,6 +47,7 @@ function App() {
           <Route path="/sell-bill" element={<SellBillForm />} />
           <Route path="/return-bill" element={<ReturnBillOptions />} />
           <Route path="/purchase-return" element={<PurchaseReturnForm />} />
+          <Route path="/purchase-return-search" element={<PurchaseReturnSearch />} />
           <Route path="/sale-return" element={<SaleReturnForm />} />
           <Route path="/expiry-bill" element={<ExpiryBillForm />} />
           <Route path="/purchase-history" element={<PurchaseHistory />} />

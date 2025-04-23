@@ -84,7 +84,7 @@ const SaleReturnForm = () => {
       const token = localStorage.getItem('token');
       
       // Get returnable quantities from the new endpoint
-      const response = await axios.get('http://localhost:5000/api/bills/returnable-quantities', {
+      const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/returnable-quantities', {
         params: {
           email: formData.email,
           partyName: formData.customerName
@@ -393,7 +393,7 @@ const SaleReturnForm = () => {
       }
 
       // If all validations pass, submit the form
-      const response = await axios.post('http://localhost:5000/api/bills/return', formData, {
+      const response = await axios.post('https://medicine-inventory-system.onrender.com/api/bills/return', formData, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'

@@ -158,13 +158,23 @@ export const createPurchaseReturnBill = async (req, res) => {
             supplierName,
             supplierGST,
             items,
-            email
+            email: emailFromBody
         } = req.body;
+
+        // Get email from authenticated user
+        const authenticatedEmail = req.user?.email;
+        const email = authenticatedEmail || emailFromBody;
 
         // Validate required fields
         if (!date || !receiptNumber || !supplierName || !supplierGST || !items || !email) {
             return res.status(400).json({ message: 'All fields are required' });
         }
+
+        console.log('Processing purchase return for:', {
+            supplierName,
+            email,
+            itemCount: items.length
+        });
 
         // Get returnable quantities for the supplier
         const returnableQuantities = await getReturnableQuantitiesForSupplier(email, supplierName);
@@ -185,6 +195,25 @@ export const createPurchaseReturnBill = async (req, res) => {
             if (item.quantity > returnableItem.returnableQuantity) {
                 return res.status(400).json({ 
                     message: `Return quantity (${item.quantity}) exceeds returnable quantity (${returnableItem.returnableQuantity}) for item ${item.itemName} (Batch: ${item.batch})` 
+                });
+            }
+
+            // Verify item exists in inventory with sufficient quantity
+            const inventoryItem = await Inventory.findOne({
+                itemName: item.itemName,
+                batch: item.batch,
+                email
+            });
+
+            if (!inventoryItem) {
+                return res.status(400).json({
+                    message: `Item ${item.itemName} (Batch: ${item.batch}) not found in inventory`
+                });
+            }
+
+            if (inventoryItem.quantity < item.quantity) {
+                return res.status(400).json({
+                    message: `Insufficient quantity in inventory for ${item.itemName} (Batch: ${item.batch}). Available: ${inventoryItem.quantity}, Requested: ${item.quantity}`
                 });
             }
         }
@@ -235,33 +264,72 @@ export const createPurchaseReturnBill = async (req, res) => {
             email
         });
 
-        await returnBill.save();
+        // Start a session for transaction
+        const session = await PurchaseReturnBill.startSession();
+        session.startTransaction();
 
-        // Update inventory
-        for (const item of items) {
-            await Inventory.findOneAndUpdate(
-                { 
-                    itemName: item.itemName, 
+        try {
+            // Save the return bill
+            await returnBill.save({ session });
+
+            // Update inventory for each item
+            for (const item of items) {
+                console.log('Updating inventory for:', {
+                    itemName: item.itemName,
                     batch: item.batch,
-                    email
-                },
-                { $inc: { quantity: -item.quantity } }
-            );
+                    quantityToDeduct: item.quantity
+                });
+
+                const result = await Inventory.findOneAndUpdate(
+                    { 
+                        itemName: item.itemName, 
+                        batch: item.batch,
+                        email
+                    },
+                    { $inc: { quantity: -item.quantity } },
+                    { 
+                        new: true,
+                        session
+                    }
+                );
+
+                if (!result) {
+                    throw new Error(`Failed to update inventory for ${item.itemName} (${item.batch})`);
+                }
+
+                console.log('Inventory updated:', {
+                    itemName: item.itemName,
+                    batch: item.batch,
+                    newQuantity: result.quantity
+                });
+            }
+
+            // Commit the transaction
+            await session.commitTransaction();
+            session.endSession();
+
+            // Generate PDF
+            const pdfPath = await generatePurchaseReturnPDF(returnBill);
+
+            res.status(201).json({
+                success: true,
+                message: 'Purchase return bill created successfully',
+                returnBill,
+                pdfUrl: `/download/pdf/${returnBill.returnInvoiceNumber}.pdf`
+            });
+        } catch (error) {
+            // If anything fails, abort the transaction
+            await session.abortTransaction();
+            session.endSession();
+            throw error;
         }
-
-        // Generate PDF
-        const pdfPath = await generatePurchaseReturnPDF(returnBill);
-
-        // Send response with file download
-        res.status(201).json({
-            success: true,
-            message: 'Purchase return bill created successfully',
-            returnBill,
-            pdfUrl: `/download/pdf/${returnBill.returnInvoiceNumber}.pdf`
-        });
     } catch (error) {
         console.error('Error in createPurchaseReturnBill:', error);
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            message: error.message,
+            errorType: error.name,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 };
 
