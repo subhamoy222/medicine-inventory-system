@@ -20,6 +20,7 @@ import PurchaseHistory from './components/PurchaseHistory';
 import PartyInvoiceSearch from './components/PartyInvoiceSearch';
 import { Toaster } from 'react-hot-toast';
 import MedicineSalesSummary from './components/Report';
+import Alerts from './components/Alerts';
 // import ExpiryBillList from './components/ExpiryBills/ExpiryBillList.js';
 // import CreateExpiryBill from './components/ExpiryBills/CreateExpiryBill.js';
 // import ViewExpiryBill from './components/ExpiryBills/ViewExpiryBill.js';
@@ -53,6 +54,7 @@ function App() {
           <Route path="/purchase-history" element={<PurchaseHistory />} />
           <Route path="/party-invoices" element={<PartyInvoiceSearch />} />
           <Route path="/medicine-sales-summary" element={<MedicineSalesSummary />} />
+          <Route path="/alerts" element={<Alerts />} />
         </Routes>
       </div>
     </Router>

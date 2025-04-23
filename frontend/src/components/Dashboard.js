@@ -15,21 +15,6 @@ function Dashboard() {
     topSellingMedicines: [],
     salesGrowth: 0
   });
-  const [partyAnalytics, setPartyAnalytics] = useState({
-    partyName: "",
-    medicines: [],
-    loading: false,
-    error: null
-  });
-  const [availableParties, setAvailableParties] = useState([]);
-  const [partyMedicines, setPartyMedicines] = useState({
-    loading: false,
-    error: null,
-    data: [],
-    selectedParty: ""
-  });
-  // Recommendation feature disabled due to missing endpoint
-  // const [recommendations, setRecommendations] = useState([]);
 
   // Set up axios default headers for JWT
   useEffect(() => {
@@ -49,57 +34,69 @@ function Dashboard() {
   const fetchDashboardData = useCallback(async () => {
     if (!email) return;
     try {
-      // Use your API endpoint and ensure it matches your backend route
       const inventoryRes = await axios.get(`https://medicine-inventory-system.onrender.com/api/inventory/${email}`);
       const inventoryData = inventoryRes.data;
       setInventoryCount(inventoryData.length);
 
       const lowStockThreshold = 10;
       const expiringSoonThreshold = 30;
-      let lowStock = 0;
-      let expiringSoon = 0;
+      let lowStockItems = [];
+      let expiringSoonItems = [];
       const currentDate = new Date();
 
       inventoryData.forEach((item) => {
-        if (item.quantity < lowStockThreshold) lowStock++;
-        const expirationDate = new Date(item.expiryDate);
-        const daysToExpire = (expirationDate - currentDate) / (1000 * 3600 * 24);
-        if (daysToExpire <= expiringSoonThreshold && daysToExpire >= 0) expiringSoon++;
+        // Check for low stock - only count items with quantity less than threshold
+        if (item.quantity <= lowStockThreshold) {
+          lowStockItems.push({
+            name: item.itemName,
+            quantity: item.quantity
+          });
+        }
+
+        // Check for expiring items - only count non-expired items that will expire within threshold
+        if (item.expiryDate) {
+          const expirationDate = new Date(item.expiryDate);
+          const daysToExpire = Math.ceil((expirationDate - currentDate) / (1000 * 3600 * 24));
+          
+          if (daysToExpire > 0 && daysToExpire <= expiringSoonThreshold) {
+            expiringSoonItems.push({
+              name: item.itemName,
+              expiryDate: item.expiryDate,
+              daysRemaining: daysToExpire
+            });
+          }
+        }
       });
 
-      setLowStockCount(lowStock);
-      setExpiringSoonCount(expiringSoon);
+      // Update state with accurate counts
+      setLowStockCount(lowStockItems.length);
+      setExpiringSoonCount(expiringSoonItems.length);
 
-      const lowStockNotifications = inventoryData
-        .filter((item) => item.quantity < lowStockThreshold)
-        .map((item) => ({
-          type: "warning",
-          message: `Low stock: ${item.itemName} (${item.quantity} units remaining)`,
-        }));
+      // Create notifications for both low stock and expiring items
+      const lowStockNotifications = lowStockItems.map(item => ({
+        type: "warning",
+        message: `Low stock: ${item.name} (${item.quantity} units remaining)`,
+      }));
 
-      const expiringSoonNotifications = inventoryData
-        .filter((item) => (new Date(item.expiryDate) - currentDate) / (1000 * 3600 * 24) <= expiringSoonThreshold)
-        .map((item) => ({
-          type: "warning",
-          message: `Expiring soon: ${item.itemName} (expires on ${new Date(item.expiryDate).toLocaleDateString()})`,
-        }));
+      const expiringSoonNotifications = expiringSoonItems.map(item => ({
+        type: "warning",
+        message: `Expiring soon: ${item.name} (${item.daysRemaining} days remaining)`,
+      }));
 
+      // Sort notifications by urgency (low stock first, then expiring soon)
       setNotifications([...lowStockNotifications, ...expiringSoonNotifications]);
+
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
+      setInventoryCount(0);
+      setLowStockCount(0);
+      setExpiringSoonCount(0);
+      setNotifications([{
+        type: "warning",
+        message: "Error loading inventory data"
+      }]);
     }
   }, [email]);
-
-  // Recommendation feature disabled due to missing endpoint
-  // const fetchRecommendations = useCallback(async () => {
-  //   if (!email) return;
-  //   try {
-  //     const res = await axios.get(`https://medicine-inventory-system.onrender.com/api/recommendations/${email}`);
-  //     setRecommendations(res.data);
-  //   } catch (error) {
-  //     console.error("Error fetching recommendations:", error);
-  //   }
-  // }, [email]);
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -107,38 +104,6 @@ function Dashboard() {
     localStorage.removeItem("authToken");
     navigate("/login");
   };
-
-  const fetchPartyMedicines = useCallback(async (partyName) => {
-    if (!email || !partyName) return;
-    
-    setPartyAnalytics(prev => ({ ...prev, loading: true, error: null }));
-    try {
-      const token = localStorage.getItem("token");
-      const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicines-by-party', {
-        params: { partyName, email },
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.data) {
-        setPartyAnalytics(prev => ({
-          ...prev,
-          medicines: response.data,
-          partyName,
-          loading: false
-        }));
-      }
-    } catch (error) {
-      console.error("Error fetching party medicines:", error);
-      setPartyAnalytics(prev => ({
-        ...prev,
-        error: "Failed to fetch party data",
-        loading: false
-      }));
-    }
-  }, [email]);
 
   const fetchAnalyticsData = useCallback(async () => {
     if (!email) return;
@@ -158,10 +123,6 @@ function Dashboard() {
 
       if (response.data && response.data.salesDetails) {
         const sales = response.data.salesDetails;
-        
-        // Extract unique parties
-        const parties = [...new Set(sales.map(sale => sale.partyName))];
-        setAvailableParties(parties);
         
         // Calculate total revenue
         const totalRevenue = sales.reduce((sum, sale) => 
@@ -196,249 +157,16 @@ function Dashboard() {
     }
   }, [email]);
 
-  // Add new function to fetch medicines by party
-  const fetchMedicinesByParty = useCallback(async (partyName) => {
-    if (!email || !partyName) return;
-    
-    setPartyMedicines(prev => ({ ...prev, loading: true, error: null, selectedParty: partyName }));
-    try {
-      const token = localStorage.getItem("token");
-      const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicines-by-party', {
-        params: { 
-          partyName,
-          email 
-        },
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      setPartyMedicines(prev => ({
-        ...prev,
-        data: response.data || [],
-        loading: false
-      }));
-    } catch (error) {
-      console.error("Error fetching medicines by party:", error);
-      setPartyMedicines(prev => ({
-        ...prev,
-        error: "Failed to fetch party medicines data",
-        loading: false,
-        data: []
-      }));
-    }
-  }, [email]);
-
-  // Fetch available parties on component mount
-  useEffect(() => {
-    const fetchParties = async () => {
-      if (!email) return;
-      try {
-        const token = localStorage.getItem("token");
-        const response = await axios.get('https://medicine-inventory-system.onrender.com/api/bills/medicine-sales', {
-          params: { email },
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.data && response.data.salesDetails) {
-          const uniqueParties = [...new Set(response.data.salesDetails.map(sale => sale.partyName))];
-          setAvailableParties(uniqueParties);
-        }
-      } catch (error) {
-        console.error("Error fetching parties:", error);
-      }
-    };
-
-    fetchParties();
-  }, [email]);
-
   useEffect(() => {
     fetchUserEmail();
-    fetchDashboardData();
-    fetchAnalyticsData();
-    // fetchRecommendations();
-  }, [fetchUserEmail, fetchDashboardData, fetchAnalyticsData]);
+  }, [fetchUserEmail]);
 
-  const renderPartyAnalytics = () => (
-    <div className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg border border-white mb-8">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-4">
-          <div className="p-3 bg-orange-100 rounded-xl">
-            <span className="text-3xl text-orange-600">👥</span>
-          </div>
-          <h2 className="text-xl font-bold text-gray-900">Party-wise Analytics</h2>
-        </div>
-        <div className="flex items-center space-x-4">
-          <select
-            value={partyAnalytics.partyName}
-            onChange={(e) => fetchPartyMedicines(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition duration-200"
-          >
-            <option value="">Select Party</option>
-            {availableParties.map((party, index) => (
-              <option key={index} value={party}>{party}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {partyAnalytics.loading ? (
-        <div className="flex justify-center items-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-orange-500"></div>
-        </div>
-      ) : partyAnalytics.error ? (
-        <div className="text-center py-8 text-red-500">{partyAnalytics.error}</div>
-      ) : partyAnalytics.medicines.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gradient-to-r from-orange-500 to-pink-500">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Medicine Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Total Quantity</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Average MRP</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Total Amount</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {partyAnalytics.medicines.map((medicine, index) => (
-                <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-orange-50'}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {medicine.medicineName}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {medicine.totalQuantity}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    ₹{medicine.averageMRP?.toFixed(2) || 0}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    ₹{medicine.totalAmount?.toFixed(2) || 0}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot className="bg-orange-50">
-              <tr>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">Total</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
-                  {partyAnalytics.medicines.reduce((sum, med) => sum + (med.totalQuantity || 0), 0)}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">-</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
-                  ₹{partyAnalytics.medicines.reduce((sum, med) => sum + (med.totalAmount || 0), 0).toFixed(2)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      ) : partyAnalytics.partyName ? (
-        <div className="text-center py-8 text-gray-500">No data found for this party</div>
-      ) : (
-        <div className="text-center py-8 text-gray-500">Select a party to view their medicine purchase history</div>
-      )}
-    </div>
-  );
-
-  // Add new component for Party Medicines Dashboard
-  const PartyMedicinesDashboard = () => (
-    <div className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg border border-white mb-8">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-4">
-          <div className="p-3 bg-purple-100 rounded-xl">
-            <span className="text-3xl text-purple-600">💊</span>
-          </div>
-          <h2 className="text-xl font-bold text-gray-900">Party Medicine Analysis</h2>
-        </div>
-        <div className="flex items-center space-x-4">
-          <select
-            value={partyMedicines.selectedParty}
-            onChange={(e) => fetchMedicinesByParty(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition duration-200"
-          >
-            <option value="">Select Party</option>
-            {availableParties.map((party, index) => (
-              <option key={index} value={party}>{party}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {partyMedicines.loading ? (
-        <div className="flex justify-center items-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-        </div>
-      ) : partyMedicines.error ? (
-        <div className="text-center py-8 text-red-500">{partyMedicines.error}</div>
-      ) : partyMedicines.data.length > 0 ? (
-        <div className="space-y-6">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-gradient-to-br from-purple-500 to-indigo-600 p-6 rounded-xl text-white">
-              <h3 className="text-lg font-semibold mb-2">Total Medicines</h3>
-              <p className="text-3xl font-bold">{partyMedicines.data.length}</p>
-              <p className="text-sm opacity-80 mt-2">Different items purchased</p>
-            </div>
-            <div className="bg-gradient-to-br from-blue-500 to-cyan-600 p-6 rounded-xl text-white">
-              <h3 className="text-lg font-semibold mb-2">Total Quantity</h3>
-              <p className="text-3xl font-bold">
-                {partyMedicines.data.reduce((sum, med) => sum + (med.totalQuantity || 0), 0)}
-              </p>
-              <p className="text-sm opacity-80 mt-2">Units purchased</p>
-            </div>
-            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-6 rounded-xl text-white">
-              <h3 className="text-lg font-semibold mb-2">Total Amount</h3>
-              <p className="text-3xl font-bold">
-                ₹{partyMedicines.data.reduce((sum, med) => sum + (med.totalAmount || 0), 0).toFixed(2)}
-              </p>
-              <p className="text-sm opacity-80 mt-2">Total purchase value</p>
-            </div>
-          </div>
-
-          {/* Detailed Table */}
-          <div className="overflow-x-auto bg-white rounded-xl shadow-sm">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gradient-to-r from-purple-500 to-indigo-600">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Medicine Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Total Quantity</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Average MRP</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-white uppercase tracking-wider">Total Amount</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {partyMedicines.data.map((medicine, index) => (
-                  <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-purple-50'}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {medicine.medicineName}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {medicine.totalQuantity}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      ₹{medicine.averageMRP?.toFixed(2) || 0}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      ₹{medicine.totalAmount?.toFixed(2) || 0}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="text-center py-12 text-gray-500">
-          {partyMedicines.selectedParty ? 
-            "No medicines found for this party" : 
-            "Select a party to view their medicine purchase history"}
-        </div>
-      )}
-    </div>
-  );
+  useEffect(() => {
+    if (email) {
+      fetchDashboardData();
+      fetchAnalyticsData();
+    }
+  }, [email, fetchDashboardData, fetchAnalyticsData]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 to-indigo-50 p-6 relative overflow-hidden">
@@ -456,9 +184,13 @@ function Dashboard() {
             <p className="text-gray-600">Pharmacy Management Dashboard</p>
           </div>
           <div className="flex items-center space-x-4">
-            <span className="bg-teal-100 text-teal-800 px-3 py-1 rounded-full text-sm">
-              {notifications.length} Alerts
-            </span>
+            <button
+              onClick={() => navigate('/alerts')}
+              className="bg-teal-100 text-teal-800 px-3 py-1 rounded-full text-sm hover:bg-teal-200 transition-colors flex items-center space-x-2"
+            >
+              <span>🔔</span>
+              <span>{notifications.length} Alerts</span>
+            </button>
             <button 
               onClick={handleLogout}
               className="flex items-center space-x-2 bg-red-500 text-white px-4 py-2 rounded-full shadow-sm hover:bg-red-600 transition-all"
@@ -519,7 +251,7 @@ function Dashboard() {
                 <h3 className="font-semibold text-gray-800 mb-4">Purchase Recommendations</h3>
                 <div className="p-4 bg-white rounded-xl shadow-sm text-gray-500">
                   Recommendations feature unavailable.
-                  </div>
+                </div>
               </div>
               <div className="space-y-4">
                 <h3 className="font-semibold text-gray-800 mb-4">Recent Transactions</h3>
@@ -547,9 +279,6 @@ function Dashboard() {
             </div>
           </div>
         </div>
-
-        {/* Add Party Medicines Dashboard */}
-        <PartyMedicinesDashboard />
 
         {/* Enhanced Advanced Analytics Section */}
         <div className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg border border-white mb-8">
@@ -611,11 +340,11 @@ function Dashboard() {
               gradient="from-teal-400 to-cyan-400"
             />
             <ActionButton 
-              label="Purchase History"
-              icon="🕰️"
-              description="Detailed purchase records"
-              onClick={() => navigate("/purchase-history")}
-              gradient="from-purple-500 to-pink-500"
+              label="Alerts Center"
+              icon="🔔"
+              description={`${notifications.length} items need attention`}
+              onClick={() => navigate("/alerts")}
+              gradient="from-orange-400 to-red-400"
             />
             <ActionButton 
               label="Generate Bill"
@@ -626,9 +355,6 @@ function Dashboard() {
             />
           </div>
         </div>
-
-        {/* Add Party Analytics Section */}
-        {renderPartyAnalytics()}
       </div>
     </div>
   );
