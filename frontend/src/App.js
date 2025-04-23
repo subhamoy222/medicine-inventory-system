@@ -10,7 +10,9 @@ import ViewInventory from './components/ViewInventory';
 import GenerateBillOptions from './components/GenerateBillOptions';
 import PurchaseBillForm from './components/PurchaseBillForm'; // Ensure this is created
 import SellBillForm from './components/SellBillForm'; // Ensure this is created
-import ReturnBillForm from './components/ReturnBillForm'; // Ensure this is created
+import ReturnBillOptions from './components/ReturnBillOptions';
+import PurchaseReturnForm from './components/PurchaseReturnForm';
+import SaleReturnForm from './components/SaleReturnForm';
 import ExpiryBillForm from './components/ExpiryBillForm';
 import BillGenerationDocs from './components/BillGenerationDocs';
 import PurchaseHistory from './components/PurchaseHistory';
@@ -42,7 +44,9 @@ function App() {
       />
           <Route path="/purchase-bill" element={<PurchaseBillForm />} />
           <Route path="/sell-bill" element={<SellBillForm />} />
-          <Route path="/return-bill" element={<ReturnBillForm />} />
+          <Route path="/return-bill" element={<ReturnBillOptions />} />
+          <Route path="/purchase-return" element={<PurchaseReturnForm />} />
+          <Route path="/sale-return" element={<SaleReturnForm />} />
           <Route path="/expiry-bill" element={<ExpiryBillForm />} />
           <Route path="/purchase-history" element={<PurchaseHistory />} />
           <Route path="/party-invoices" element={<PartyInvoiceSearch />} />

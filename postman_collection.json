@@ -1,0 +1,72 @@
+{
+  "info": {
+    "name": "Medicine Inventory - Sale Returns",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Returns by Party",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY3ZTgyZjU1N2Q2MGFlNmNkYjJkNjk3ZCIsImVtYWlsIjoic3ViaGFtc2FzbWFsMzk2QGdtYWlsLmNvbSIsImlhdCI6MTc0NTMyNzE2OCwiZXhwIjoxNzQ1MzMwNzY4fQ.slM6T1X0DbeGCu-CfBUbD6fHWWI1tc3faTUxYgSPOqo",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:5000/api/returns/returns-by-party?email=subhamsasmal396@gmail.com&customerName=a",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "returns", "returns-by-party"],
+          "query": [
+            {
+              "key": "email",
+              "value": "subhamsasmal396@gmail.com"
+            },
+            {
+              "key": "customerName",
+              "value": "a"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create Sale Return",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY3ZTgyZjU1N2Q2MGFlNmNkYjJkNjk3ZCIsImVtYWlsIjoic3ViaGFtc2FzbWFsMzk2QGdtYWlsLmNvbSIsImlhdCI6MTc0NTMyNzE2OCwiZXhwIjoxNzQ1MzMwNzY4fQ.slM6T1X0DbeGCu-CfBUbD6fHWWI1tc3faTUxYgSPOqo",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:5000/api/returns/return",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "returns", "return"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"email\": \"subhamsasmal396@gmail.com\",\n    \"returnInvoiceNumber\": \"RET001\",\n    \"date\": \"2024-02-20\",\n    \"receiptNumber\": \"REC001\",\n    \"customerName\": \"a\",\n    \"items\": [\n        {\n            \"itemName\": \"onabetsd\",\n            \"batch\": \"B100208\",\n            \"quantity\": 1,\n            \"discount\": 0,\n            \"amount\": 100,\n            \"availableQuantity\": 10,\n            \"purchaseRate\": 100,\n            \"gstPercentage\": 18,\n            \"gstAmount\": 18,\n            \"returnableQuantity\": 10\n        }\n    ],\n    \"totalAmount\": 100,\n    \"totalDiscount\": 0,\n    \"gstAmount\": 18,\n    \"netAmount\": 118\n}"
+        }
+      }
+    }
+  ]
+} 
