@@ -1,20 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
+const API_BASE_URL = 'http://localhost:5000';
+
 const PurchaseReturnForm = () => {
   const [formData, setFormData] = useState({
     email: '',
     date: new Date().toISOString().split('T')[0],
     receiptNumber: '',
     supplierName: '',
-    originalBillNumber: '',
+    supplierGST: '',
     items: [
       {
         itemName: '',
         batch: '',
         quantity: 0,
         purchaseRate: 0,
-        amount: 0,
+        mrp: 0,
+        discount: 0,
+        gstPercentage: 0,
         expiryDate: '',
         returnableQuantity: 0
       }
@@ -22,10 +26,11 @@ const PurchaseReturnForm = () => {
   });
 
   const [suppliers, setSuppliers] = useState([]);
-  const [purchaseBills, setPurchaseBills] = useState([]);
+  const [returnableItems, setReturnableItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isBillsLoaded, setIsBillsLoaded] = useState(false);
   const [calculations, setCalculations] = useState({
     totalAmount: 0,
     totalDiscount: 0,
@@ -35,7 +40,7 @@ const PurchaseReturnForm = () => {
 
   // Load email from localStorage on component mount
   useEffect(() => {
-    const userEmail = localStorage.getItem('userEmail');
+    const userEmail = localStorage.getItem('email');
     if (userEmail) {
       setFormData(prev => ({ ...prev, email: userEmail }));
     }
@@ -47,7 +52,7 @@ const PurchaseReturnForm = () => {
       if (!formData.email) return;
       
       try {
-        const response = await axios.get('/api/suppliers', {
+        const response = await axios.get(`${API_BASE_URL}/api/suppliers`, {
           params: { email: formData.email }
         });
         setSuppliers(response.data);
@@ -61,35 +66,37 @@ const PurchaseReturnForm = () => {
     }
   }, [formData.email]);
 
-  // Fetch supplier's purchase bills when supplier is selected
-  useEffect(() => {
-    const fetchPurchaseBills = async () => {
-      if (!formData.supplierName || !formData.email) return;
-      
-      try {
-        setLoading(true);
-        const response = await axios.get(`/api/purchasebills`, {
-          params: {
-            email: formData.email,
-            partyName: formData.supplierName
-          }
-        });
-        setPurchaseBills(response.data);
-        setLoading(false);
-      } catch (err) {
-        console.error('Error fetching purchase bills:', err);
-        setLoading(false);
-      }
-    };
-
-    if (formData.supplierName && formData.email) {
-      fetchPurchaseBills();
+  const handleLoadBills = async () => {
+    if (!formData.supplierName || !formData.email) {
+      setError('Please enter supplier name');
+      return;
     }
-  }, [formData.supplierName, formData.email]);
+
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/api/purchase-returns/returnable-quantities`, {
+        params: {
+          email: formData.email,
+          supplierName: formData.supplierName
+        }
+      });
+      setReturnableItems(response.data);
+      setIsBillsLoaded(true);
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching returnable quantities:', err);
+      setError('Error loading bills. Please try again.');
+      setLoading(false);
+    }
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
+    if (name === 'supplierName') {
+      setIsBillsLoaded(false);
+      setReturnableItems([]);
+    }
   };
 
   const handleItemChange = (index, e) => {
@@ -99,6 +106,21 @@ const PurchaseReturnForm = () => {
       ...updatedItems[index],
       [name]: value
     };
+
+    // If item name changes, update available batches and other details
+    if (name === 'itemName') {
+      updatedItems[index].batch = ''; // Reset batch when item changes
+      const returnableItem = returnableItems.find(
+        item => item.itemName.toLowerCase() === value.toLowerCase()
+      );
+      if (returnableItem) {
+        updatedItems[index].returnableQuantity = returnableItem.returnableQuantity;
+        updatedItems[index].purchaseRate = returnableItem.purchaseRate;
+        updatedItems[index].mrp = returnableItem.mrp;
+        updatedItems[index].expiryDate = returnableItem.expiryDate;
+      }
+    }
+
     setFormData({ ...formData, items: updatedItems });
     calculateTotals();
   };
@@ -113,7 +135,9 @@ const PurchaseReturnForm = () => {
           batch: '',
           quantity: 0,
           purchaseRate: 0,
-          amount: 0,
+          mrp: 0,
+          discount: 0,
+          gstPercentage: 0,
           expiryDate: '',
           returnableQuantity: 0
         }
@@ -135,14 +159,17 @@ const PurchaseReturnForm = () => {
     formData.items.forEach(item => {
       if (item.quantity && item.purchaseRate) {
         const itemTotal = item.quantity * item.purchaseRate;
-        const itemGST = itemTotal * 0.18; // 18% GST
+        const itemDiscount = (itemTotal * item.discount) / 100;
+        const amountAfterDiscount = itemTotal - itemDiscount;
+        const itemGST = (amountAfterDiscount * item.gstPercentage) / 100;
 
         totalAmount += itemTotal;
+        totalDiscount += itemDiscount;
         totalGST += itemGST;
       }
     });
 
-    const netAmount = totalAmount + totalGST;
+    const netAmount = totalAmount - totalDiscount + totalGST;
 
     setCalculations({
       totalAmount,
@@ -157,22 +184,30 @@ const PurchaseReturnForm = () => {
     
     try {
       setLoading(true);
-      const response = await axios.post('/api/purchase-returns', formData);
+      const response = await axios.post(`${API_BASE_URL}/api/purchase-returns/create`, formData);
       setSuccess('Purchase return bill created successfully!');
       setError('');
+      
+      // Download PDF
+      if (response.data.pdfUrl) {
+        const pdfUrl = `${API_BASE_URL}/api/purchase-returns${response.data.pdfUrl}`;
+        window.open(pdfUrl, '_blank');
+      }
       
       // Reset form
       setFormData({
         ...formData,
         receiptNumber: '',
-        originalBillNumber: '',
+        supplierGST: '',
         items: [
           {
             itemName: '',
             batch: '',
             quantity: 0,
             purchaseRate: 0,
-            amount: 0,
+            mrp: 0,
+            discount: 0,
+            gstPercentage: 0,
             expiryDate: '',
             returnableQuantity: 0
           }
@@ -193,9 +228,9 @@ const PurchaseReturnForm = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <h1 className="text-2xl font-bold text-gray-800 mb-6">Create Purchase Return Bill</h1>
+      <div className="max-w-[95%] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="bg-white rounded-lg shadow-lg p-8">
+          <h1 className="text-3xl font-bold text-gray-800 mb-8">Create Purchase Return Bill</h1>
           
           {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -210,51 +245,51 @@ const PurchaseReturnForm = () => {
           )}
           
           <form onSubmit={handleSubmit}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-8">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Email</label>
                 <input
                   type="email"
                   name="email"
                   value={formData.email}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100"
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md bg-gray-100"
                   readOnly
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Date</label>
                 <input
                   type="date"
                   name="date"
                   value={formData.date}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md"
                   required
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Receipt Number</label>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Receipt Number</label>
                 <input
                   type="text"
                   name="receiptNumber"
                   value={formData.receiptNumber}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md"
                   required
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Supplier Name</label>
                 <div className="flex space-x-2">
                   <input
                     type="text"
                     name="supplierName"
                     value={formData.supplierName}
                     onChange={handleInputChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md"
                     list="suppliersList"
                     required
                   />
@@ -263,146 +298,242 @@ const PurchaseReturnForm = () => {
                       <option key={index} value={supplier.name} />
                     ))}
                   </datalist>
+                  <button
+                    type="button"
+                    onClick={handleLoadBills}
+                    disabled={loading || !formData.supplierName}
+                    className="px-6 py-3 text-lg bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+                  >
+                    {loading ? 'Loading...' : 'Load Bills'}
+                  </button>
                 </div>
               </div>
-              
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Original Purchase Bill</label>
-                <select
-                  name="originalBillNumber"
+                <label className="block text-lg font-medium text-gray-700 mb-2">Supplier GST</label>
+                <input
+                  type="text"
+                  name="supplierGST"
+                  value={formData.supplierGST}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md"
                   required
+                />
+              </div>
+            </div>
+
+            <div className="mb-8">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-semibold text-gray-800">Items</h2>
+                <button
+                  type="button"
+                  onClick={addItemRow}
+                  className="px-6 py-3 text-lg bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  disabled={!isBillsLoaded}
                 >
-                  <option value="">Select Purchase Bill</option>
-                  {purchaseBills.map((bill, index) => (
-                    <option key={index} value={bill._id}>
-                      {bill.invoiceNumber} - {new Date(bill.date).toLocaleDateString()}
-                    </option>
-                  ))}
-                </select>
+                  Add Item
+                </button>
               </div>
-            </div>
-            
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Return Items</h2>
-            
-            <div className="overflow-x-auto mb-6">
-              <table className="min-w-full bg-white border border-gray-200">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="py-2 px-4 border-b border-r text-left">Item Name</th>
-                    <th className="py-2 px-4 border-b border-r text-left">Batch</th>
-                    <th className="py-2 px-4 border-b border-r text-center">Returnable Qty</th>
-                    <th className="py-2 px-4 border-b border-r text-center">Return Qty</th>
-                    <th className="py-2 px-4 border-b border-r text-center">Purchase Rate</th>
-                    <th className="py-2 px-4 border-b border-r text-center">Expiry Date</th>
-                    <th className="py-2 px-4 border-b text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {formData.items.map((item, index) => (
-                    <tr key={index} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                      <td className="py-2 px-4 border-b border-r">
-                        <input
-                          type="text"
-                          name="itemName"
-                          value={item.itemName}
-                          onChange={(e) => handleItemChange(index, e)}
-                          className="w-full px-2 py-1 border border-gray-300 rounded-md"
-                          required
-                        />
-                      </td>
-                      <td className="py-2 px-4 border-b border-r">
-                        <input
-                          type="text"
-                          name="batch"
-                          value={item.batch}
-                          onChange={(e) => handleItemChange(index, e)}
-                          className="w-full px-2 py-1 border border-gray-300 rounded-md"
-                          required
-                        />
-                      </td>
-                      <td className="py-2 px-4 border-b border-r text-center">
-                        <span className="font-medium">{item.returnableQuantity}</span>
-                      </td>
-                      <td className="py-2 px-4 border-b border-r">
-                        <input
-                          type="number"
-                          name="quantity"
-                          value={item.quantity}
-                          onChange={(e) => handleItemChange(index, e)}
-                          min="1"
-                          max={item.returnableQuantity}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded-md mx-auto text-center"
-                          required
-                        />
-                      </td>
-                      <td className="py-2 px-4 border-b border-r">
-                        <input
-                          type="number"
-                          name="purchaseRate"
-                          value={item.purchaseRate}
-                          onChange={(e) => handleItemChange(index, e)}
-                          className="w-24 px-2 py-1 border border-gray-300 rounded-md mx-auto text-center"
-                          required
-                        />
-                      </td>
-                      <td className="py-2 px-4 border-b border-r text-center">
-                        {item.expiryDate ? new Date(item.expiryDate).toLocaleDateString() : 'N/A'}
-                      </td>
-                      <td className="py-2 px-4 border-b text-center">
-                        <button
-                          type="button"
-                          onClick={() => removeItemRow(index)}
-                          className="text-red-500 hover:text-red-700"
-                          disabled={formData.items.length === 1}
-                        >
-                          Remove
-                        </button>
-                      </td>
+
+              <div className="overflow-x-auto">
+                <table className="w-full divide-y divide-gray-200 table-fixed">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[15%]">Item Name</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">Batch</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">Quantity</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">Returnable Qty</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">Purchase Rate</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">MRP</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">Discount %</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">GST %</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[10%]">Expiry Date</th>
+                      <th className="px-6 py-4 text-left text-lg font-medium text-gray-500 uppercase tracking-wider w-[5%]">Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            
-            <div className="mb-6">
-              <button
-                type="button"
-                onClick={addItemRow}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-              >
-                Add Item
-              </button>
-            </div>
-            
-            <div className="bg-gray-50 p-4 rounded-md mb-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Bill Summary</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div className="flex justify-between py-2 border-b">
-                    <span>Total Amount:</span>
-                    <span>₹{calculations.totalAmount.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b">
-                    <span>Total GST (18%):</span>
-                    <span>₹{calculations.totalGST.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between py-2 font-bold">
-                    <span>Net Refund Amount:</span>
-                    <span>₹{calculations.netAmount.toFixed(2)}</span>
-                  </div>
-                </div>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {formData.items.map((item, index) => (
+                      <tr key={index}>
+                        <td className="px-6 py-4">
+                          <input
+                            type="text"
+                            name="itemName"
+                            value={item.itemName}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            required
+                            disabled={!isBillsLoaded}
+                            placeholder="Enter item name"
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <select
+                            name="batch"
+                            value={item.batch}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            required
+                            disabled={!item.itemName}
+                          >
+                            <option value="">Select Batch</option>
+                            {returnableItems
+                              .filter(ri => ri.itemName.toLowerCase() === item.itemName.toLowerCase())
+                              .map((returnableItem, idx) => (
+                                <option key={idx} value={returnableItem.batch}>
+                                  {returnableItem.batch}
+                                </option>
+                              ))}
+                          </select>
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            name="quantity"
+                            value={item.quantity}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            min="1"
+                            max={item.returnableQuantity}
+                            required
+                            disabled={!item.batch}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            value={item.returnableQuantity}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md bg-gray-100 font-medium"
+                            readOnly
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            name="purchaseRate"
+                            value={item.purchaseRate}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            min="0"
+                            step="0.01"
+                            required
+                            disabled={!item.batch}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            name="mrp"
+                            value={item.mrp}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            min="0"
+                            step="0.01"
+                            required
+                            disabled={!item.batch}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            name="discount"
+                            value={item.discount}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            required
+                            disabled={!item.batch}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            name="gstPercentage"
+                            value={item.gstPercentage}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            min="0"
+                            max="100"
+                            required
+                            disabled={!item.batch}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="date"
+                            name="expiryDate"
+                            value={item.expiryDate}
+                            onChange={(e) => handleItemChange(index, e)}
+                            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md font-medium"
+                            required
+                            disabled={!item.batch}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <button
+                            type="button"
+                            onClick={() => removeItemRow(index)}
+                            className="text-red-600 hover:text-red-900 text-lg font-medium"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
-            
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-8">
+              <div>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Total Amount</label>
+                <input
+                  type="number"
+                  value={calculations.totalAmount.toFixed(2)}
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md bg-gray-100"
+                  readOnly
+                />
+              </div>
+              <div>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Total Discount</label>
+                <input
+                  type="number"
+                  value={calculations.totalDiscount.toFixed(2)}
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md bg-gray-100"
+                  readOnly
+                />
+              </div>
+              <div>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Total GST</label>
+                <input
+                  type="number"
+                  value={calculations.totalGST.toFixed(2)}
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md bg-gray-100"
+                  readOnly
+                />
+              </div>
+              <div>
+                <label className="block text-lg font-medium text-gray-700 mb-2">Net Amount</label>
+                <input
+                  type="number"
+                  value={calculations.netAmount.toFixed(2)}
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-md bg-gray-100"
+                  readOnly
+                />
+              </div>
+            </div>
+
             <div className="flex justify-end">
               <button
                 type="submit"
-                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-300"
                 disabled={loading}
+                className="px-8 py-4 text-lg bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
               >
-                {loading ? 'Processing...' : 'Create Purchase Return Bill'}
+                {loading ? 'Creating...' : 'Create Return Bill'}
               </button>
             </div>
           </form>

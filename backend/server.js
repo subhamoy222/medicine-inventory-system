@@ -10,6 +10,7 @@ import expiryBillRoutes from './routes/expiryBillRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import expiryRoutes from './routes/expiryRoutes.js';
 import returnBillRoutes from './routes/returnBillRoutes.js';
+import purchaseReturnRoutes from './routes/purchaseReturnRoutes.js';
 
 // Middleware
 import errorMiddleware from './middleware/errorMiddleware.js';
@@ -49,6 +50,7 @@ app.use('/api/expiry-bills', expiryBillRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/expiry', expiryRoutes);
 app.use('/api/returns', returnBillRoutes);
+app.use('/api/purchase-returns', purchaseReturnRoutes);
 
 // Error Handling Middleware
 app.use(errorMiddleware);

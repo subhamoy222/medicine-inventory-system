@@ -246,6 +246,7 @@ const SellBillForm = () => {
             batchNumber: batch.batch.replace(/[^a-zA-Z0-9]/g, ''),
             quantity: batch.quantity,
             mrp: batch.mrp,
+            purchaseRate: batch.purchaseRate,
             gstNo: sellDetails.gstNumber
           }));
           
@@ -256,6 +257,8 @@ const SellBillForm = () => {
             batch: sanitizedBatch,
             availableQuantity: data[0].quantity,
             mrp: data[0].mrp?.toString() || "",
+            purchaseRate: data[0].purchaseRate?.toString() || "",
+            gstPercentage: data[0].gstPercentage?.toString() || "0"
           });
           
           setMessage("");
@@ -270,6 +273,8 @@ const SellBillForm = () => {
             batch: "",
             availableQuantity: 0,
             mrp: "",
+            purchaseRate: "",
+            gstPercentage: "0"
           });
         }
       } catch (error) {
@@ -313,6 +318,8 @@ const SellBillForm = () => {
           batch: cleanBatch,
           availableQuantity: selectedBatch.quantity,
           mrp: selectedBatch.mrp?.toString() || "",
+          purchaseRate: selectedBatch.purchaseRate?.toString() || "",
+          gstPercentage: selectedBatch.gstPercentage?.toString() || "0"
         });
       }
       return;
@@ -326,15 +333,25 @@ const SellBillForm = () => {
     const quantity = parseFloat(currentItem.quantity) || 0;
     const mrp = parseFloat(currentItem.mrp) || 0;
     const discount = parseFloat(currentItem.discount) || 0;
+    const gstPercentage = parseFloat(currentItem.gstPercentage) || 0;
     
     if (quantity > currentItem.availableQuantity) {
       setMessage(`Insufficient stock for ${currentItem.itemName}`);
     } else if (quantity <= 0) {
       setMessage("Quantity must be greater than 0");
     } else {
-      const itemAmount = quantity * mrp;
-      const discountedAmount = itemAmount - (itemAmount * discount) / 100;
-      updateItem(index, { amount: discountedAmount.toFixed(2) });
+      const totalAmount = quantity * mrp;
+      const discountAmount = (totalAmount * discount) / 100;
+      const amountAfterDiscount = totalAmount - discountAmount;
+      const gstAmount = (amountAfterDiscount * gstPercentage) / 100;
+      const netAmount = amountAfterDiscount + gstAmount;
+      
+      updateItem(index, { 
+        amount: netAmount.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        discountAmount: discountAmount.toFixed(2),
+        gstAmount: gstAmount.toFixed(2)
+      });
       setMessage("");
     }
   };
@@ -368,41 +385,129 @@ const SellBillForm = () => {
 
   const generatePDF = () => {
     const doc = new jsPDF();
-    doc.text(`GSTIN: ${sellDetails.gstNumber}`, 10, 10);
-    doc.text(`Invoice Number: ${sellDetails.saleInvoiceNumber}`, 10, 20);
     
-    const headers = [
-      "Item Name",
-      "Batch",
-      "Qty",
-      "MRP",
-      "Discount%",
-      "Amount"
+    // Add header with gradient background
+    doc.setFillColor(41, 128, 185); // Blue color
+    doc.rect(0, 0, 210, 40, 'F');
+    
+    // Add title
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(20);
+    doc.text('Sales Invoice', 105, 20, { align: 'center' });
+    
+    // Add company details
+    doc.setFontSize(10);
+    doc.text('Medicine Inventory Management System', 105, 30, { align: 'center' });
+    
+    // Add invoice details
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    doc.text(`Invoice Number: ${sellDetails.saleInvoiceNumber || 'INV001'}`, 20, 50);
+    doc.text(`Date: ${sellDetails.date}`, 20, 60);
+    doc.text(`Receipt Number: ${sellDetails.receiptNumber}`, 20, 70);
+    
+    // Add party details
+    doc.setFontSize(12);
+    doc.text('Party Details:', 20, 85);
+    doc.setFontSize(10);
+    doc.text(`Name: ${sellDetails.partyName}`, 20, 95);
+    doc.text(`GST Number: ${sellDetails.gstNumber}`, 20, 100);
+    
+    // Add items table
+    const tableColumn = [
+      'Item Name',
+      'Batch',
+      'Qty',
+      'Purchase Rate',
+      'MRP',
+      'Disc%',
+      'GST%',
+      'Amount'
     ];
-
-    let y = 40;
-    headers.forEach((header, i) => {
-      doc.text(header, 10 + i * 35, y);
-    });
-
-    items.forEach((item) => {
-      y += 10;
-      [
-        item.itemName,
-        item.batch,
-        item.quantity,
-        item.mrp,
-        item.discount,
-        item.amount
-      ].forEach((value, i) => {
-        doc.text(String(value || "-"), 10 + i * 35, y);
-      });
-    });
-
-    const totalAmount = items.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0);
-    doc.text(`Total Amount: ₹${totalAmount.toFixed(2)}`, 10, y + 20);
     
-    doc.save("invoice.pdf");
+    const tableRows = items.map(item => [
+      item.itemName,
+      item.batch,
+      item.quantity,
+      `₹${parseFloat(item.purchaseRate).toFixed(2)}`,
+      `₹${parseFloat(item.mrp).toFixed(2)}`,
+      `${item.discount}%`,
+      `${item.gstPercentage}%`,
+      `₹${parseFloat(item.amount).toFixed(2)}`
+    ]);
+    
+    doc.autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      startY: 110,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [41, 128, 185],
+        textColor: 255,
+        fontSize: 10,
+        fontStyle: 'bold',
+        halign: 'center'
+      },
+      bodyStyles: {
+        fontSize: 9,
+        halign: 'center'
+      },
+      alternateRowStyles: {
+        fillColor: [240, 240, 240]
+      },
+      columnStyles: {
+        0: { cellWidth: 35 }, // Item Name
+        1: { cellWidth: 15 }, // Batch
+        2: { cellWidth: 10 }, // Quantity
+        3: { cellWidth: 20 }, // Purchase Rate
+        4: { cellWidth: 15 }, // MRP
+        5: { cellWidth: 10 }, // Discount
+        6: { cellWidth: 10 }, // GST
+        7: { cellWidth: 20 }  // Amount
+      },
+      styles: {
+        cellPadding: 2,
+        fontSize: 9,
+        valign: 'middle'
+      },
+      margin: { left: 20, right: 20 }
+    });
+    
+    // Add summary
+    const finalY = doc.lastAutoTable.finalY + 20;
+    doc.setFontSize(12);
+    doc.text('Bill Summary', 20, finalY);
+    
+    // Calculate totals
+    const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.totalAmount) || 0), 0);
+    const totalDiscount = items.reduce((sum, item) => sum + (parseFloat(item.discountAmount) || 0), 0);
+    const totalGst = items.reduce((sum, item) => sum + (parseFloat(item.gstAmount) || 0), 0);
+    const netAmount = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    
+    doc.setFontSize(10);
+    doc.text(`Total Amount: ₹${totalAmount.toFixed(2)}`, 20, finalY + 10);
+    doc.text(`Total Discount: ₹${totalDiscount.toFixed(2)}`, 20, finalY + 20);
+    doc.text(`Total GST: ₹${totalGst.toFixed(2)}`, 20, finalY + 30);
+    
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Net Amount: ₹${netAmount.toFixed(2)}`, 20, finalY + 45);
+    
+    // Add footer
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text('This is a computer-generated document. No signature required.', 105, 280, { align: 'center' });
+    
+    // Add terms and conditions
+    doc.setFontSize(8);
+    doc.text('Terms and Conditions:', 20, 290);
+    doc.setFontSize(7);
+    doc.text('1. Goods once sold will not be taken back.', 20, 295);
+    doc.text('2. Subject to local jurisdiction.', 20, 300);
+    
+    // Save the PDF with proper invoice number
+    const invoiceNumber = sellDetails.saleInvoiceNumber || 'INV001';
+    doc.save(`SalesInvoice_${invoiceNumber}.pdf`);
   };
 
   const createSellBill = async () => {
@@ -410,13 +515,13 @@ const SellBillForm = () => {
     const email = localStorage.getItem("email");
 
     if (!sellDetails.gstNumber) {
-      setMessage("GST Number is required");
+      setMessage({ type: 'error', text: "GST Number is required" });
       return;
     }
 
     const gstMismatch = items.some(item => item.gstNo !== sellDetails.gstNumber);
     if (gstMismatch) {
-      setMessage("All items must have the same GST Number");
+      setMessage({ type: 'error', text: "All items must have the same GST Number" });
       return;
     }
 
@@ -426,7 +531,7 @@ const SellBillForm = () => {
     );
 
     if (invalidQuantities) {
-      setMessage("Invalid quantities detected");
+      setMessage({ type: 'error', text: "Invalid quantities detected" });
       return;
     }
 
@@ -456,15 +561,15 @@ const SellBillForm = () => {
       const responseData = await response.json();
 
       if (response.ok) {
-        setMessage("Invoice created successfully!");
+        setMessage({ type: 'success', text: "Invoice created successfully!" });
         generatePDF();
         resetItems();
-        resetForm(); // Use the new reset function
+        resetForm();
       } else {
-        setMessage(responseData.message || "Failed to create invoice");
+        setMessage({ type: 'error', text: responseData.message || "Failed to create invoice" });
       }
     } catch (error) {
-      setMessage("Error creating invoice");
+      setMessage({ type: 'error', text: "Error creating invoice" });
     } finally {
       setLoading(false);
     }
@@ -548,7 +653,7 @@ const SellBillForm = () => {
             <table className="w-full">
               <thead className="bg-indigo-600 text-white">
                 <tr>
-                  {["Item Name", "Batch", "Available", "Qty", "MRP", "Discount%", "GST No", "Amount"].map((header, idx) => (
+                  {["Item Name", "Batch", "Available", "Qty", "Purchase Rate", "MRP", "Discount%", "GST %", "Amount"].map((header, idx) => (
                     <th 
                       key={idx}
                       className="px-4 py-3 text-left text-sm font-medium last:text-right"
@@ -640,6 +745,18 @@ const SellBillForm = () => {
                       />
                     </td>
                     <td className="px-4 py-3">
+                      <div className="flex items-center">
+                        <span className="text-gray-500 mr-1">₹</span>
+                        <input
+                          type="number"
+                          name="purchaseRate"
+                          value={item.purchaseRate}
+                          readOnly
+                          className="w-24 px-2 py-1 text-sm text-center bg-gray-50 border border-gray-300 rounded-md"
+                        />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
                       <input
                         type="number"
                         name="mrp"
@@ -661,13 +778,19 @@ const SellBillForm = () => {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <input
-                        type="text"
-                        name="gstNo"
-                        value={sellDetails.gstNumber}
-                        readOnly
-                        className="w-full rounded-md bg-indigo-50 border-indigo-100"
-                      />
+                      <div className="flex items-center">
+                        <input
+                          type="number"
+                          name="gstPercentage"
+                          value={item.gstPercentage}
+                          onChange={(e) => handleItemChange(index, e)}
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          className="w-16 px-2 py-1 text-sm text-center border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <span className="text-gray-500 ml-1">%</span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-emerald-600">
                       {item.amount || "-"}
@@ -692,14 +815,28 @@ const SellBillForm = () => {
 
           <div className="space-x-4">
             {message && (
-              <div className="inline-flex items-center bg-rose-100 text-rose-700 px-4 py-2 rounded-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              <div className={`inline-flex items-center px-4 py-2 rounded-lg ${
+                message.type === 'success' 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-rose-100 text-rose-700'
+              }`}>
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  className={`h-5 w-5 mr-2 ${
+                    message.type === 'success' ? 'text-green-500' : 'text-rose-500'
+                  }`} 
+                  viewBox="0 0 20 20" 
+                  fill="currentColor"
+                >
+                  {message.type === 'success' ? (
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  ) : (
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  )}
                 </svg>
-                {message}
+                {message.text}
               </div>
             )}
-           
             
             <button
               onClick={createSellBill}

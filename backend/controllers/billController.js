@@ -365,206 +365,37 @@ export const createReturnBill = async (req, res) => {
             return res.status(400).json({ message: 'All fields are required' });
         }
 
-        // Get total sold quantities for this customer
-        const soldItems = await SaleBill.aggregate([
-            {
-                $match: {
-                    email: email,
-                    partyName: customerName
-                }
-            },
-            {
-                $unwind: '$items'
-            },
-            {
-                $group: {
-                    _id: {
-                        itemName: '$items.itemName',
-                        batch: '$items.batch'
-                    },
-                    totalSold: { $sum: '$items.quantity' },
-                    expiryDate: { $last: '$items.expiryDate' }  // Changed from $first to $last to get most recent
-                }
-            }
-        ]);
+        // Calculate totals for each item
+        const processedItems = items.map(item => {
+            const totalAmount = item.purchaseRate * item.quantity;
+            const discountAmount = (totalAmount * item.discount) / 100;
+            const amountAfterDiscount = totalAmount - discountAmount;
+            const gstAmount = (amountAfterDiscount * item.gstPercentage) / 100;
+            const netAmount = amountAfterDiscount + gstAmount;
 
-        console.log('Sold items aggregation result:', JSON.stringify(soldItems, null, 2));
+            return {
+                ...item,
+                totalAmount,
+                discountAmount,
+                amount: amountAfterDiscount,
+                gstAmount,
+                netAmount
+            };
+        });
 
-        // Get total returned quantities for this customer
-        const returnedItems = await ReturnBill.aggregate([
-            {
-                $match: {
-                    email: email,
-                    customerName: customerName
-                }
-            },
-            {
-                $unwind: '$items'
-            },
-            {
-                $group: {
-                    _id: {
-                        itemName: '$items.itemName',
-                        batch: '$items.batch'
-                    },
-                    totalReturned: { $sum: '$items.quantity' }
-                }
-            }
-        ]);
-
-        // Create a map for easy lookup of returned quantities
-        const returnedQuantityMap = new Map(
-            returnedItems.map(item => [
-                `${item._id.itemName}-${item._id.batch}`,
-                item.totalReturned
-            ])
-        );
-
-        // Create a map for sold items data
-        const soldItemsMap = new Map(
-            soldItems.map(item => [
-                `${item._id.itemName}-${item._id.batch}`,
-                {
-                    totalSold: item.totalSold,
-                    expiryDate: item.expiryDate
-                }
-            ])
-        );
-
-        // Validate each return item
-        for (const item of items) {
-            const key = `${item.itemName}-${item.batch}`;
-            const soldData = soldItemsMap.get(key);
-            const returnedQuantity = returnedQuantityMap.get(key) || 0;
-
-            console.log('Validating item:', {
-                itemName: item.itemName,
-                batch: item.batch,
-                soldData: soldData,
-                returnedQuantity: returnedQuantity
-            });
-
-            // Check if item was actually sold to this customer
-            if (!soldData) {
-                return res.status(400).json({
-                    message: `Item ${item.itemName} (Batch: ${item.batch}) was not sold to this customer`
-                });
-            }
-
-            // Calculate returnable quantity
-            const returnableQuantity = soldData.totalSold - returnedQuantity;
-
-            // Validate return quantity
-            if (item.quantity > returnableQuantity) {
-                return res.status(400).json({
-                    message: `Cannot return ${item.quantity} units of ${item.itemName} (Batch: ${item.batch}). Maximum returnable quantity is ${returnableQuantity}`
-                });
-            }
-
-            // Get expiry date from the original sale bill
-            console.log('Searching for sale bill with criteria:', {
-                email,
-                customerName,
-                itemDetails: {
-                    itemName: item.itemName,
-                    batch: item.batch
-                }
-            });
-
-            // First try to get expiry date from inventory
-            const inventoryItem = await Inventory.findOne({
-                email,
-                itemName: { $regex: new RegExp('^' + item.itemName + '$', 'i') },
-                batch: { $regex: new RegExp('^' + item.batch + '$', 'i') }
-            });
-
-            console.log('Inventory item found:', inventoryItem ? {
-                itemName: inventoryItem.itemName,
-                batch: inventoryItem.batch,
-                expiryDate: inventoryItem.expiryDate
-            } : 'No inventory item found');
-
-            // Find all sale bills for this item
-            const saleBills = await SaleBill.find({
-                email,
-                partyName: customerName,
-                'items.itemName': { $regex: new RegExp('^' + item.itemName + '$', 'i') },
-                'items.batch': { $regex: new RegExp('^' + item.batch + '$', 'i') }
-            }).sort({ date: -1 }); // Get most recent first
-
-            console.log('Sale bills found:', saleBills.map(bill => ({
-                id: bill._id,
-                date: bill.date,
-                items: bill.items.filter(i => 
-                    i.itemName.toLowerCase() === item.itemName.toLowerCase() &&
-                    i.batch.toLowerCase() === item.batch.toLowerCase()
-                )
-            })));
-
-            // Get expiry date from either inventory or sale bills
-            let expiryDate;
-            if (inventoryItem && inventoryItem.expiryDate) {
-                expiryDate = new Date(inventoryItem.expiryDate);
-            } else if (saleBills.length > 0) {
-                // Try to find expiry date in any of the sale bills
-                for (const bill of saleBills) {
-                    const saleItem = bill.items.find(i =>
-                        i.itemName.toLowerCase() === item.itemName.toLowerCase() &&
-                        i.batch.toLowerCase() === item.batch.toLowerCase()
-                    );
-                    if (saleItem && saleItem.expiryDate) {
-                        expiryDate = new Date(saleItem.expiryDate);
-                        break;
-                    }
-                }
-            }
-
-            if (!expiryDate) {
-                // If no expiry date found, we'll need to update the sale bills with the current inventory expiry date
-                if (inventoryItem) {
-                    // Update all sale bills for this item with the inventory expiry date
-                    await SaleBill.updateMany(
-                        {
-                            email,
-                            'items.itemName': { $regex: new RegExp('^' + item.itemName + '$', 'i') },
-                            'items.batch': { $regex: new RegExp('^' + item.batch + '$', 'i') }
-                        },
-                        {
-                            $set: {
-                                'items.$.expiryDate': inventoryItem.expiryDate
-                            }
-                        }
-                    );
-                    expiryDate = new Date(inventoryItem.expiryDate);
-                } else {
-                    return res.status(400).json({
-                        message: `Cannot verify expiry date for ${item.itemName} (Batch: ${item.batch}). Item not found in inventory.`
-                    });
-                }
-            }
-
-            const currentDate = new Date();
-
-            console.log('Date validation:', {
-                itemName: item.itemName,
-                batch: item.batch,
-                expiryDate: expiryDate,
-                currentDate: currentDate,
-                isExpired: expiryDate < currentDate
-            });
-
-            if (expiryDate < currentDate) {
-                return res.status(400).json({
-                    message: `Cannot return expired item ${item.itemName} (Batch: ${item.batch}). Expiry date: ${expiryDate.toISOString().split('T')[0]}`
-                });
-            }
-        }
-
-        // Calculate totals
-        const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
-        const totalDiscount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
-        const gstAmount = totalAmount * 0.18; // Assuming 18% GST
-        const netAmount = totalAmount - totalDiscount + gstAmount;
+        // Calculate bill totals
+        const billTotals = processedItems.reduce((acc, item) => {
+            acc.totalAmount += item.totalAmount;
+            acc.totalDiscount += item.discountAmount;
+            acc.totalGstAmount += item.gstAmount;
+            acc.netAmount += item.netAmount;
+            return acc;
+        }, {
+            totalAmount: 0,
+            totalDiscount: 0,
+            totalGstAmount: 0,
+            netAmount: 0
+        });
 
         // Generate return invoice number
         const returnInvoiceNumber = `RET${Date.now().toString().slice(-6)}`;
@@ -576,11 +407,8 @@ export const createReturnBill = async (req, res) => {
             date,
             receiptNumber,
             customerName,
-            items,
-            totalAmount,
-            totalDiscount,
-            gstAmount,
-            netAmount,
+            items: processedItems,
+            ...billTotals,
             email
         });
 
@@ -598,26 +426,8 @@ export const createReturnBill = async (req, res) => {
             );
         }
 
-        // Update customer purchase history to reflect return
-        await CustomerPurchase.findOneAndUpdate(
-            { 
-                customerName: customerName,
-                'purchaseHistory.items.itemName': items[0].itemName,
-                'purchaseHistory.items.batch': items[0].batch
-            },
-            {
-                $inc: {
-                    'purchaseHistory.$.items.$[item].quantity': -items[0].quantity
-                }
-            },
-            {
-                arrayFilters: [
-                    { 'item.itemName': items[0].itemName, 'item.batch': items[0].batch }
-                ]
-            }
-        );
-
         res.status(201).json({
+            success: true,
             message: 'Return bill created successfully',
             returnBill,
             returnableQuantities: Object.fromEntries(

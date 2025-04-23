@@ -235,15 +235,18 @@ const SaleReturnForm = () => {
       };
       
       // Recalculate amounts when any value changes
-      const baseAmount = item.purchaseRate * updatedItems[index].quantity;
-      const discountAmount = (baseAmount * updatedItems[index].discount) / 100;
-      const amountAfterDiscount = baseAmount - discountAmount;
+      const totalAmount = item.purchaseRate * updatedItems[index].quantity;
+      const discountAmount = (totalAmount * updatedItems[index].discount) / 100;
+      const amountAfterDiscount = totalAmount - discountAmount;
       const gstAmount = (amountAfterDiscount * updatedItems[index].gstPercentage) / 100;
       
       updatedItems[index] = {
         ...updatedItems[index],
+        totalAmount: totalAmount,
+        discountAmount: discountAmount,
         amount: amountAfterDiscount,
-        gstAmount: gstAmount
+        gstAmount: gstAmount,
+        netAmount: amountAfterDiscount + gstAmount
       };
     } else {
       updatedItems[index] = {
@@ -289,19 +292,20 @@ const SaleReturnForm = () => {
     let totalAmount = 0;
     let totalDiscount = 0;
     let totalGstAmount = 0;
+    let netAmount = 0;
 
     items.forEach(item => {
-      const baseAmount = item.purchaseRate * item.quantity;
-      const discountAmount = (baseAmount * item.discount) / 100;
-      const amountAfterDiscount = baseAmount - discountAmount;
-      const gstAmount = (amountAfterDiscount * item.gstPercentage) / 100;
+      const itemTotalAmount = item.purchaseRate * item.quantity;
+      const itemDiscountAmount = (itemTotalAmount * item.discount) / 100;
+      const itemAmountAfterDiscount = itemTotalAmount - itemDiscountAmount;
+      const itemGstAmount = (itemAmountAfterDiscount * item.gstPercentage) / 100;
+      const itemNetAmount = itemAmountAfterDiscount + itemGstAmount;
 
-      totalAmount += amountAfterDiscount;
-      totalDiscount += discountAmount;
-      totalGstAmount += gstAmount;
+      totalAmount += itemTotalAmount;
+      totalDiscount += itemDiscountAmount;
+      totalGstAmount += itemGstAmount;
+      netAmount += itemNetAmount;
     });
-
-    const netAmount = totalAmount + totalGstAmount;
 
     setFormData(prevState => ({
       ...prevState,
