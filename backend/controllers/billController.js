@@ -351,51 +351,201 @@ export const getPurchaseHistory = async (req, res) => {
 
 export const createReturnBill = async (req, res) => {
     try {
+        // Initialize maps at the start using Map objects
+        const soldItemsMap = new Map();
+        const returnedQuantityMap = new Map();
+
         const {
             date,
             receiptNumber,
             customerName,
             items,
-            email,
-            originalBillNumber
+            email: emailFromBody,
+            totalAmount,
+            totalDiscount,
+            gstAmount,
+            netAmount
         } = req.body;
 
-        // Validate required fields
-        if (!date || !receiptNumber || !customerName || !items || !email) {
-            return res.status(400).json({ message: 'All fields are required' });
+        // Get authenticated user's email
+        const authenticatedEmail = req.user?.email;
+
+        // For backend testing: if email is provided in body, it must match authenticated email
+        // For frontend: must have authenticated email
+        if (!authenticatedEmail) {
+            return res.status(401).json({
+                message: 'Authentication required. Please log in.'
+            });
         }
 
-        // Calculate totals for each item
-        const processedItems = items.map(item => {
-            const totalAmount = item.purchaseRate * item.quantity;
-            const discountAmount = (totalAmount * item.discount) / 100;
-            const amountAfterDiscount = totalAmount - discountAmount;
-            const gstAmount = (amountAfterDiscount * item.gstPercentage) / 100;
-            const netAmount = amountAfterDiscount + gstAmount;
+        // If email is provided in body (backend testing), verify it matches authenticated email
+        if (emailFromBody && emailFromBody !== authenticatedEmail) {
+            return res.status(403).json({
+                message: 'Email in request does not match authenticated user',
+                debug: {
+                    providedEmail: emailFromBody,
+                    authenticatedEmail: authenticatedEmail
+                }
+            });
+        }
 
-            return {
-                ...item,
-                totalAmount,
-                discountAmount,
-                amount: amountAfterDiscount,
-                gstAmount,
-                netAmount
-            };
+        // Use authenticated email
+        const email = authenticatedEmail;
+
+        console.log('Return Bill Request:', {
+            customerName,
+            email,
+            itemsToReturn: items,
+            authenticatedUser: req.user?.email
         });
 
-        // Calculate bill totals
-        const billTotals = processedItems.reduce((acc, item) => {
-            acc.totalAmount += item.totalAmount;
-            acc.totalDiscount += item.discountAmount;
-            acc.totalGstAmount += item.gstAmount;
-            acc.netAmount += item.netAmount;
-            return acc;
-        }, {
-            totalAmount: 0,
-            totalDiscount: 0,
-            totalGstAmount: 0,
-            netAmount: 0
+        // Basic validation including email
+        if (!date || !receiptNumber || !customerName || !items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ 
+                message: 'All fields are required',
+                missingFields: {
+                    date: !date,
+                    receiptNumber: !receiptNumber,
+                    customerName: !customerName,
+                    items: !items || !Array.isArray(items) || items.length === 0
+                }
+            });
+        }
+
+        // First, get all unique customer names from sale bills for this email
+        const allSaleBills = await SaleBill.find({ email });
+        const uniqueCustomers = [...new Set(allSaleBills.map(bill => bill.partyName))];
+        console.log('Available customers:', uniqueCustomers);
+
+        // Get all sale bills for this customer with more flexible matching
+        const saleBills = await SaleBill.find({
+            email,
+            $or: [
+                { partyName: customerName }, // Exact match
+                { partyName: { $regex: new RegExp(`^${customerName}$`, 'i') } }, // Case-insensitive exact match
+                { customerName: customerName }, // Exact match on customerName field
+                { customerName: { $regex: new RegExp(`^${customerName}$`, 'i') } } // Case-insensitive exact match on customerName field
+            ]
         });
+
+        console.log('Found sale bills:', {
+            count: saleBills.length,
+            customerName,
+            email,
+            matchedCustomers: saleBills.map(bill => bill.partyName || bill.customerName)
+        });
+
+        if (saleBills.length === 0) {
+            // Get suggestions for customer name
+            const suggestions = uniqueCustomers.filter(name => 
+                name.toLowerCase().includes(customerName.toLowerCase()) ||
+                customerName.toLowerCase().includes(name.toLowerCase())
+            );
+
+            return res.status(400).json({
+                message: `No sales found for customer: ${customerName}`,
+                suggestions: suggestions.length > 0 ? {
+                    message: "Did you mean one of these customers?",
+                    customers: suggestions
+                } : undefined
+            });
+        }
+
+        // Log all sold items for debugging
+        const soldItems = saleBills.flatMap(bill => 
+            bill.items.map(item => ({
+                itemName: item.itemName,
+                batch: item.batch,
+                quantity: item.quantity,
+                billPartyName: bill.partyName || bill.customerName
+            }))
+        );
+        console.log('Items previously sold to customer:', soldItems);
+
+        // Process sale bills and populate soldItemsMap
+        saleBills.forEach(bill => {
+            if (bill.items && Array.isArray(bill.items)) {
+                bill.items.forEach(item => {
+                    const key = `${item.itemName.toLowerCase()}-${item.batch}`;
+                    const currentData = soldItemsMap.get(key) || {
+                        totalSold: 0,
+                        purchaseRate: item.purchaseRate,
+                        mrp: item.mrp,
+                        gstPercentage: item.gstPercentage,
+                        customerNames: new Set()
+                    };
+                    currentData.totalSold += parseInt(item.quantity) || 0;
+                    currentData.customerNames.add(bill.partyName || bill.customerName);
+                    soldItemsMap.set(key, currentData);
+                });
+            }
+        });
+
+        console.log('Sold items map:', Array.from(soldItemsMap.entries()).map(([key, value]) => ({
+            key,
+            totalSold: value.totalSold,
+            customerNames: Array.from(value.customerNames)
+        })));
+
+        // Get existing return bills
+        const returnBills = await ReturnBill.find({
+            email,
+            $or: [
+                { customerName: customerName },
+                { customerName: { $regex: new RegExp(`^${customerName}$`, 'i') } }
+            ]
+        });
+
+        console.log('Found return bills:', {
+            count: returnBills.length,
+            customerName
+        });
+
+        // Process return bills and populate returnedQuantityMap
+        returnBills.forEach(bill => {
+            if (bill.items && Array.isArray(bill.items)) {
+                bill.items.forEach(item => {
+                    const key = `${item.itemName.toLowerCase()}-${item.batch}`;
+                    const currentQuantity = returnedQuantityMap.get(key) || 0;
+                    returnedQuantityMap.set(key, currentQuantity + (parseInt(item.quantity) || 0));
+                });
+            }
+        });
+
+        console.log('Returned quantities map:', Array.from(returnedQuantityMap.entries()));
+
+        // Validate each item is returnable
+        for (const item of items) {
+            const key = `${item.itemName.toLowerCase()}-${item.batch}`;
+            console.log('Checking item:', {
+                itemName: item.itemName,
+                batch: item.batch,
+                key: key,
+                soldData: soldItemsMap.get(key),
+                returnedQuantity: returnedQuantityMap.get(key) || 0
+            });
+
+            const soldData = soldItemsMap.get(key);
+            const returnedQuantity = returnedQuantityMap.get(key) || 0;
+
+            if (!soldData) {
+                return res.status(400).json({
+                    message: `Item ${item.itemName} (Batch: ${item.batch}) was not sold to this customer`,
+                    debug: {
+                        availableItems: Array.from(soldItemsMap.keys()),
+                        requestedKey: key,
+                        suggestion: "Please check the item name and batch number"
+                    }
+                });
+            }
+
+            const returnableQuantity = soldData.totalSold - returnedQuantity;
+            if (item.quantity > returnableQuantity) {
+                return res.status(400).json({
+                    message: `Return quantity (${item.quantity}) exceeds returnable quantity (${returnableQuantity}) for item ${item.itemName} (Batch: ${item.batch})`
+                });
+            }
+        }
 
         // Generate return invoice number
         const returnInvoiceNumber = `RET${Date.now().toString().slice(-6)}`;
@@ -403,12 +553,14 @@ export const createReturnBill = async (req, res) => {
         // Create return bill
         const returnBill = new ReturnBill({
             returnInvoiceNumber,
-            originalBillNumber,
             date,
             receiptNumber,
             customerName,
-            items: processedItems,
-            ...billTotals,
+            items,
+            totalAmount,
+            totalDiscount,
+            gstAmount,
+            netAmount,
             email
         });
 
@@ -417,8 +569,8 @@ export const createReturnBill = async (req, res) => {
         // Update inventory
         for (const item of items) {
             await Inventory.findOneAndUpdate(
-                { 
-                    itemName: item.itemName, 
+                {
+                    itemName: item.itemName,
                     batch: item.batch,
                     email
                 },
@@ -429,27 +581,15 @@ export const createReturnBill = async (req, res) => {
         res.status(201).json({
             success: true,
             message: 'Return bill created successfully',
-            returnBill,
-            returnableQuantities: Object.fromEntries(
-                items.map(item => {
-                    const key = `${item.itemName}-${item.batch}`;
-                    const soldData = soldItemsMap.get(key);
-                    const returnedQuantity = returnedQuantityMap.get(key) || 0;
-                    return [
-                        key,
-                        {
-                            originalSold: soldData.totalSold,
-                            previouslyReturned: returnedQuantity,
-                            currentReturn: item.quantity,
-                            remainingReturnable: soldData.totalSold - returnedQuantity - item.quantity
-                        }
-                    ]
-                })
-            )
+            returnBill
         });
     } catch (error) {
         console.error('Error in createReturnBill:', error);
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            message: error.message,
+            errorType: error.name,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 };
 

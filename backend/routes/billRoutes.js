@@ -24,17 +24,14 @@ const router = express.Router();
 router.post('/purchase', isAuthenticated, createPurchaseBill);
 router.post('/sale', isAuthenticated, createSaleBill);
 router.post('/return', isAuthenticated, createReturnBill);
-router.get('/', isAuthenticated, getBills);
-router.get('/batch-details', getBatchDetails);
-router.get('/purchase-history/:gstNo', isAuthenticated, getPurchaseHistory);
-router.post('/next-invoice-number', isAuthenticated, getNextInvoiceNumber);
-router.get('/medicine-sales', isAuthenticated, getMedicineSalesDetails);
-router.get('/purchase-history', isAuthenticated, getPurchaseBillHistory);
 
-// Return bill routes
+// Get bill details
 router.get('/sale-bill/:billId', isAuthenticated, getSaleBillDetails);
+router.get('/batch-details', isAuthenticated, getBatchDetails);
+router.get('/purchase-history', isAuthenticated, getPurchaseHistory);
+router.get('/next-invoice', isAuthenticated, getNextInvoiceNumber);
+router.get('/medicine-sales', isAuthenticated, getMedicineSalesDetails);
 router.get('/medicines-by-party', isAuthenticated, getMedicinesByParty);
-router.post('/return-bill', isAuthenticated, createReturnBill);
 
 // Inventory Sub-routes
 router.use('/inventory', inventoryRoutes);
